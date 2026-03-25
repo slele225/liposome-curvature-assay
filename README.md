@@ -9,25 +9,95 @@ for sub-diffraction-limit spot detection.
 > (`Single_Liposome_Curvature_Assay_Protocol.docx`) for beginner-friendly
 > instructions with troubleshooting.
 
-## Setup
+## Getting Started
+
+### 1. Install prerequisites
+
+**Python 3.9+** — check with `python --version` (or `python3 --version` on
+some Macs). If not installed, download from https://www.python.org/downloads/.
+On Windows, check "Add python.exe to PATH" during install.
+
+**uv** (package manager) — install by running:
+
+macOS/Linux:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Windows PowerShell:
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Close and reopen your terminal after installing uv.
+
+### 2. Clone the repo
 
 ```bash
-# Clone or download from Box, then cd into the repo
+git clone https://github.com/slele225/liposome-curvature-assay.git
 cd liposome-curvature-assay
+```
 
-# Create a virtual environment and install dependencies
+If you don't have git, go to
+https://github.com/slele225/liposome-curvature-assay, click the green
+**Code** button, then **Download ZIP**. Unzip it and `cd` into the folder.
+
+### 3. Set up the Python environment
+
+```bash
 uv venv
 uv pip install -r requirements.txt
+```
 
-# Activate the virtual environment
-source .venv/bin/activate        # macOS / Linux
-.venv\Scripts\Activate           # Windows PowerShell
+### 4. Activate the virtual environment
 
-# Verify
+macOS/Linux:
+```bash
+source .venv/bin/activate
+```
+
+Windows PowerShell:
+```powershell
+.venv\Scripts\Activate
+```
+
+Your terminal prompt should now start with `(.venv)`. **You need to do this
+every time you open a new terminal.**
+
+### 5. Create your data folders and verify
+
+```bash
+mkdir data figures
 python plot_curvature.py --help
 ```
 
-You need to activate the venv every time you open a new terminal.
+### 6. Add your data
+
+Copy your raw TIFFs and DLS `.xlsx` files into the `data/` folder:
+
+```
+liposome-curvature-assay/
+└── data/
+    ├── my_dls.xlsx
+    └── my_experiment/
+        ├── image001.tif
+        ├── image002.tif
+        └── ...
+```
+
+The `data/` and `figures/` folders are gitignored — your data stays on your
+machine and will never be pushed to GitHub.
+
+### Updating to the latest version
+
+If the code gets updated, pull the changes:
+
+```bash
+cd liposome-curvature-assay
+git pull
+```
+
+Your `data/` and `figures/` folders are unaffected.
 
 ## Overview
 
