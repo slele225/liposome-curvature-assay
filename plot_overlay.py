@@ -1,13 +1,14 @@
 """
 Overlay normalized curvature-sorting curves from multiple experiments.
 
-Reads multiple filtered puncta A-value files (each with its own DLS
-calibration), computes protein surface density vs. radius for each,
-bins the data, normalizes each curve so the rightmost bin = 1, and
-overlays just the binned averages on a single plot.
+Reads multiple filtered puncta A-value files (each with its own conversion
+factor from dls_calibration.py), computes protein surface density vs. radius
+for each, bins the data, normalizes each curve so the rightmost bin
+(largest radius, lowest curvature) = 1, and overlays just the binned
+averages on a single plot.
 
-This lets you compare fold-enrichment at high curvature across
-conditions, proteins, or replicates.
+The y-axis shows fold-enrichment at high curvature relative to flat
+membranes.
 """
 
 import os
@@ -54,17 +55,16 @@ def load_puncta_file(path, lipid_col, protein_col):
 
 # ── Core computation ────────────────────────────────────────────────────
 
-def amplitude_to_radius(lipid_A, dls_mean_diameter):
-    """Convert lipid amplitudes to physical radii (nm)."""
+def amplitude_to_radius(lipid_A, conversion_factor):
+    """
+    Convert lipid amplitudes to physical radii (nm).
+
+    diameter = sqrt(lipid_A) * conversion_factor
+    radius = diameter / 2
+    """
     lipid_A = np.clip(lipid_A, 0, None)
     sqrt_lipid = np.sqrt(lipid_A)
-    mean_sqrt = float(np.mean(sqrt_lipid))
-
-    if mean_sqrt <= 0:
-        raise ValueError("mean(sqrt(lipid_A)) is non-positive.")
-
-    scale = dls_mean_diameter / mean_sqrt
-    diameter = sqrt_lipid * scale
+    diameter = sqrt_lipid * conversion_factor
     return diameter / 2.0
 
 
@@ -108,12 +108,12 @@ def normalize_to_rightmost(centres, means):
 
 def parse_input_pairs(input_args):
     """
-    Parse input arguments as file:diameter pairs.
+    Parse input arguments as file:conversion_factor pairs.
 
     Accepts either:
-      file1.txt:80.11 file2.txt:95.0
+      file1.txt:1.234 file2.txt:1.567
     or:
-      file1.txt 80.11 file2.txt 95.0
+      file1.txt 1.234 file2.txt 1.567
     """
     pairs = []
 
@@ -122,18 +122,18 @@ def parse_input_pairs(input_args):
         for arg in input_args:
             if ":" not in arg:
                 raise ValueError(
-                    f"Expected file:diameter format, got '{arg}'. "
-                    f"Use path/to/file.txt:80.11"
+                    f"Expected file:conversion_factor format, got '{arg}'. "
+                    f"Use path/to/file.txt:1.234"
                 )
-            path, diam_str = arg.rsplit(":", 1)
-            pairs.append((path, float(diam_str)))
+            path, factor_str = arg.rsplit(":", 1)
+            pairs.append((path, float(factor_str)))
     else:
-        # Alternating: file diameter file diameter
+        # Alternating: file factor file factor
         if len(input_args) % 2 != 0:
             raise ValueError(
-                "Expected alternating file/diameter pairs. "
-                "Use: file1.txt 80.11 file2.txt 95.0  OR  "
-                "file1.txt:80.11 file2.txt:95.0"
+                "Expected alternating file/conversion_factor pairs. "
+                "Use: file1.txt 1.234 file2.txt 1.567  OR  "
+                "file1.txt:1.234 file2.txt:1.567"
             )
         for i in range(0, len(input_args), 2):
             pairs.append((input_args[i], float(input_args[i + 1])))
@@ -150,8 +150,9 @@ def main():
         epilog=(
             "Example:\n"
             "  python plot_overlay.py \\\n"
-            "    --input data/cond1/filtered.txt:80.11 "
-            "data/cond2/filtered.txt:95.0 \\\n"
+            "    --input data/cond1/filtered.txt:1.234 "
+            "data/cond2/filtered.txt:1.567 \\\n"
+            "    --labels \"WT protein\" \"Mutant K58A\" \\\n"
             "    --save-dir figures/"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -160,9 +161,10 @@ def main():
         "--input",
         required=True,
         nargs="+",
-        help="Input files with DLS diameters. Use file.txt:diameter "
-             "format (e.g., data/filtered.txt:80.11) or alternating "
-             "file diameter pairs.",
+        help="Input files with conversion factors. Use file.txt:factor "
+             "format (e.g., data/filtered.txt:1.234) or alternating "
+             "file factor pairs. The conversion factor maps "
+             "sqrt(A) to diameter in nm.",
     )
     parser.add_argument(
         "--lipid-col",
@@ -198,7 +200,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # Parse file:diameter pairs
+    # Parse file:factor pairs
     try:
         pairs = parse_input_pairs(args.input)
     except ValueError as e:
@@ -221,7 +223,7 @@ def main():
     print("NORMALIZED CURVATURE OVERLAY")
     print("=" * 60)
 
-    for i, (path, dls_diam) in enumerate(pairs):
+    for i, (path, conv_factor) in enumerate(pairs):
         if not os.path.isfile(path):
             print(f"[SKIP] File not found: {path}")
             continue
@@ -231,7 +233,7 @@ def main():
                 path, args.lipid_col, args.protein_col
             )
 
-            radius = amplitude_to_radius(lipid_A, dls_diam)
+            radius = amplitude_to_radius(lipid_A, conv_factor)
             density, valid = compute_density(protein_A, radius)
 
             x = radius[valid]
@@ -245,10 +247,10 @@ def main():
             else:
                 label = os.path.basename(os.path.dirname(path))
 
-            all_curves.append((bx, by_norm, label, dls_diam, len(x)))
+            all_curves.append((bx, by_norm, label, conv_factor, len(x)))
 
             print(
-                f"  {label}: {len(x)} points, DLS = {dls_diam} nm, "
+                f"  {label}: {len(x)} points, conv={conv_factor:.4f}, "
                 f"{len(bx)} bins, rightmost density = {by[-1]:.4g}"
             )
 
@@ -262,17 +264,17 @@ def main():
     # ── Plot ────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(10, 7))
 
-    for bx, by_norm, label, dls_diam, n_pts in all_curves:
+    for bx, by_norm, label, conv_factor, n_pts in all_curves:
         ax.plot(
             bx, by_norm, "o-",
             markersize=5, linewidth=1.5,
-            label=f"{label} (n={n_pts}, DLS={dls_diam:.0f} nm)",
+            label=f"{label} (n={n_pts})",
         )
 
     ax.axhline(1.0, color="gray", linestyle="--", linewidth=0.8, alpha=0.5)
     ax.set_xlabel("Liposome radius (nm)")
     ax.set_ylabel("Normalized protein density (fold enrichment)")
-    ax.set_title("Curvature Sorting — Normalized Overlay")
+    ax.set_title("Curvature Sorting \u2014 Normalized Overlay")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.2)
 

@@ -105,21 +105,15 @@ def plot_raw_amplitudes(data: dict, save_path: str, bins: int, transform: str = 
     print(f"Saved amplitude histograms ({transform}) → {save_path}")
 
 
-def plot_diameter_distribution(lipid_A: np.ndarray, dls_mean_diameter: float,
+def plot_diameter_distribution(lipid_A: np.ndarray, conversion_factor: float,
                                 save_path: str, bins: int):
     """
     Histogram of estimated diameters from lipid amplitudes, calibrated
-    against DLS mean diameter.
+    using a conversion factor: diameter = sqrt(A) * conversion_factor.
     """
     lipid_A = np.clip(lipid_A, 0, None)
     sqrt_lipid = np.sqrt(lipid_A)
-    mean_sqrt = float(np.mean(sqrt_lipid))
-
-    if mean_sqrt <= 0:
-        raise ValueError("mean(sqrt(lipid_A)) is non-positive — cannot calibrate.")
-
-    scale = dls_mean_diameter / mean_sqrt
-    diameters = sqrt_lipid * scale
+    diameters = sqrt_lipid * conversion_factor
 
     fig, ax = plt.subplots(figsize=(8, 5))
 
@@ -134,8 +128,6 @@ def plot_diameter_distribution(lipid_A: np.ndarray, dls_mean_diameter: float,
                label=f"Mean = {mean_d:.1f} nm")
     ax.axvline(median_d, color="orange", linestyle="--", linewidth=1,
                label=f"Median = {median_d:.1f} nm")
-    ax.axvline(dls_mean_diameter, color="green", linestyle="-", linewidth=1.5,
-               label=f"DLS mean = {dls_mean_diameter:.1f} nm")
 
     ax.set_xlabel("Estimated liposome diameter (nm)")
     ax.set_ylabel("Density")
@@ -201,10 +193,11 @@ def main():
              'Omit for lipid-only analysis.',
     )
     parser.add_argument(
-        "--dls-mean-diameter",
+        "--conversion-factor",
         type=float,
         default=None,
-        help="Mean liposome diameter (nm) from DLS. If provided, generates "
+        help="Conversion factor: diameter_nm = sqrt(A) * factor. "
+             "From dls_calibration.py. If provided, generates "
              "a calibrated diameter distribution plot.",
     )
     parser.add_argument(
@@ -263,13 +256,13 @@ def main():
         prot_path = os.path.join(save_dir, f"{parent}__protein_amplitude_histogram.png")
         plot_protein_per_liposome(lipid_A, protein_A, prot_path, args.bins)
 
-    # 3. Diameter distribution (only if DLS diameter provided)
-    if args.dls_mean_diameter is not None:
+    # 3. Diameter distribution (only if conversion factor provided)
+    if args.conversion_factor is not None:
         diam_path = os.path.join(save_dir, f"{parent}__diameter_distribution.png")
-        plot_diameter_distribution(lipid_A, args.dls_mean_diameter, diam_path, args.bins)
+        plot_diameter_distribution(lipid_A, args.conversion_factor, diam_path, args.bins)
     else:
-        print("\nSkipping diameter distribution (no --dls-mean-diameter provided).")
-        print("Add --dls-mean-diameter to see estimated liposome sizes.")
+        print("\nSkipping diameter distribution (no --conversion-factor provided).")
+        print("Add --conversion-factor to see estimated liposome sizes.")
 
 
 if __name__ == "__main__":

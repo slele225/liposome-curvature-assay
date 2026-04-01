@@ -59,27 +59,34 @@ def load_puncta_file(path: str, lipid_col: str, protein_col: str):
 
 # ── Core computation ────────────────────────────────────────────────────
 
-def amplitude_to_radius(lipid_A: np.ndarray, dls_mean_diameter_nm: float):
+def amplitude_to_radius(lipid_A: np.ndarray, dls_mean_diameter_nm: float = None,
+                        conversion_factor: float = None):
     """
     Convert lipid amplitudes to physical radii (nm).
 
-    The conversion assumes:
-      sqrt(lipid_A) ∝ diameter
-    so:
-      scale = dls_mean_diameter / mean(sqrt(lipid_A))
-      diameter = sqrt(lipid_A) * scale
-      radius   = diameter / 2
+    Two modes:
+      1. --dls-mean-diameter: ratio-of-means method
+         scale = dls_mean_diameter / mean(sqrt(lipid_A))
+         diameter = sqrt(lipid_A) * scale
+
+      2. --conversion-factor: direct mapping from sqrt(A) to diameter
+         diameter = sqrt(lipid_A) * conversion_factor
 
     Returns (radius_nm, scale_factor).
     """
     lipid_A = np.clip(lipid_A, 0, None)
     sqrt_lipid = np.sqrt(lipid_A)
-    mean_sqrt = float(np.mean(sqrt_lipid))
 
-    if mean_sqrt <= 0:
-        raise ValueError("mean(sqrt(lipid_A)) is non-positive — cannot calibrate.")
+    if conversion_factor is not None:
+        scale = conversion_factor
+    elif dls_mean_diameter_nm is not None:
+        mean_sqrt = float(np.mean(sqrt_lipid))
+        if mean_sqrt <= 0:
+            raise ValueError("mean(sqrt(lipid_A)) is non-positive.")
+        scale = dls_mean_diameter_nm / mean_sqrt
+    else:
+        raise ValueError("Must provide either dls_mean_diameter or conversion_factor.")
 
-    scale = dls_mean_diameter_nm / mean_sqrt
     diameter_nm = sqrt_lipid * scale
     radius_nm = diameter_nm / 2.0
     return radius_nm, scale
@@ -143,8 +150,17 @@ def main():
     parser.add_argument(
         "--dls-mean-diameter",
         type=float,
-        required=True,
-        help="Mean liposome diameter (nm) from DLS",
+        default=None,
+        help="Mean liposome diameter (nm) from DLS. Uses ratio-of-means "
+             "conversion. Provide this OR --conversion-factor, not both.",
+    )
+    parser.add_argument(
+        "--conversion-factor",
+        type=float,
+        default=None,
+        help="Direct conversion factor: diameter_nm = sqrt(A) * factor. "
+             "From dls_calibration.py log-normal fitting. "
+             "Provide this OR --dls-mean-diameter, not both.",
     )
     parser.add_argument(
         "--lipid-col",
@@ -169,6 +185,11 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.dls_mean_diameter is None and args.conversion_factor is None:
+        parser.error("Must provide either --dls-mean-diameter or --conversion-factor.")
+    if args.dls_mean_diameter is not None and args.conversion_factor is not None:
+        parser.error("Provide only one of --dls-mean-diameter or --conversion-factor.")
+
     for path in args.input:
         if not os.path.isfile(path):
             print(f"[SKIP] File not found: {path}")
@@ -179,7 +200,11 @@ def main():
                 path, args.lipid_col, args.protein_col
             )
 
-            radius, scale = amplitude_to_radius(lipid_A, args.dls_mean_diameter)
+            radius, scale = amplitude_to_radius(
+                lipid_A,
+                dls_mean_diameter_nm=args.dls_mean_diameter,
+                conversion_factor=args.conversion_factor,
+            )
             density, valid = compute_protein_density(protein_A, radius)
 
             x = radius[valid]
