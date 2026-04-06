@@ -161,6 +161,8 @@ liposome-curvature-assay/
 ├── plot_curvature.py
 ├── plot_histograms.py
 ├── plot_overlay.py
+├── plot_dls.py
+├── plot_dls_comparison.py
 ├── requirements.txt
 ├── .gitignore
 └── README.md
@@ -282,7 +284,7 @@ python plot_histograms.py \
 | `--input`             | Filtered puncta file from Step 3 |
 | `--lipid-col`         | Column for lipid amplitude (default: `A_ch1`) |
 | `--protein-col`       | Column for protein amplitude. Omit for lipid-only |
-| `--dls-mean-diameter` | Mean diameter from DLS. Omit to skip diameter plot |
+| `--conversion-factor` | Conversion factor from `dls_calibration.py`. Omit to skip diameter plot |
 | `--bins`              | Number of histogram bins (default: `80`) |
 | `--transform`         | `raw`, `sqrt`, or `log_sqrt` (default: `raw`) |
 | `--save-dir`          | Output directory for figures |
@@ -292,38 +294,48 @@ python plot_histograms.py \
 Fits log-normal distributions to both the DLS intensity distribution and
 the fluorescence sqrt(A) distribution simultaneously, producing conversion
 factors that map sqrt(amplitude) to physical diameter in nm. Also computes
-the simple ratio-of-means conversion for comparison.
+the simple ratio-of-means conversion (from the number distribution) for
+comparison. If `--z-avg` and `--pdi` are omitted, only the ratio-of-means
+is computed.
 
 **DLS data preparation:** Export the size distribution from the Malvern
-Zetasizer software and copy the intensity distribution into an Excel
-spreadsheet. The spreadsheet should have the standard Zetasizer format
-with "X Intensity", "X Volume", and "X Number" section headers. The script
-reads the intensity distribution for log-normal fitting and the number
-distribution for the simple ratio-of-means method.
+Zetasizer software and copy it into an Excel spreadsheet. The spreadsheet
+must have the standard Zetasizer format with "X Intensity", "X Volume",
+and "X Number" section headers. The script reads the intensity distribution
+for log-normal fitting and the number distribution for ratio-of-means.
+You also need the Z-average and PDI from the Zetasizer cumulants summary
+report (for log-normal fitting).
 
 ```bash
+# Full log-normal fitting (recommended)
 python dls_calibration.py \
     --dls-input data/dls_data.xlsx \
     --fluor-input data/.../filtered_puncta_A_values.txt \
     --z-avg 131.0 \
     --pdi 0.08 \
     --save-dir figures/
+
+# Ratio-of-means only (if Z-avg/PDI not available)
+python dls_calibration.py \
+    --dls-input data/dls_data.xlsx \
+    --fluor-input data/.../filtered_puncta_A_values.txt
 ```
 
 | Argument         | Meaning |
 |------------------|---------|
-| `--dls-input`    | Path to Zetasizer `.xlsx` export with intensity distribution |
+| `--dls-input`    | Path to Zetasizer `.xlsx` export |
 | `--fluor-input`  | Path to `filtered_puncta_A_values.txt` from Step 3 |
-| `--z-avg`        | Z-average diameter (nm) from Zetasizer cumulants summary |
-| `--pdi`          | Polydispersity index from Zetasizer cumulants summary |
+| `--z-avg`        | Z-average diameter (nm). Optional — needed for log-normal fitting |
+| `--pdi`          | Polydispersity index. Optional — needed for log-normal fitting |
 | `--lipid-col`    | Column name for lipid amplitude (default: `A_ch1`) |
 | `--n-bins`       | Bins for sqrt(A) histogram (default: `80`) |
 | `--save-dir`     | Save overlay plots (optional) |
 
-Outputs three conversion factors (sqrt(A) → diameter in nm): the log-normal
-`exp(mu_dls - mu_fluor)`, the mode ratio, and the simple ratio-of-means.
-Use the log-normal conversion with `--conversion-factor` in the plotting
-scripts, or the ratio-of-means with `--dls-mean-diameter`.
+Outputs up to three conversion factors (sqrt(A) → diameter in nm): the
+log-normal `exp(mu_dls - mu_fluor)`, the mode ratio, and the simple
+ratio-of-means (from the number distribution). Use the log-normal
+conversion with `--conversion-factor` in the plotting scripts, or the
+ratio-of-means with `--dls-mean-diameter`.
 
 ### Optional: Normalized overlay across experiments
 
@@ -349,17 +361,65 @@ python plot_overlay.py \
 The conversion factor for each file maps sqrt(A) to diameter in nm. Get it
 from `dls_calibration.py`.
 
+### Optional: DLS distribution plots
+
+Quick visualization of the DLS distribution, with optional log x-axis.
+Choose between number or intensity distribution.
+
+```bash
+python plot_dls.py data/dls_data.xlsx                          # number, raw diameter
+python plot_dls.py data/dls_data.xlsx --log                     # number, log(diameter)
+python plot_dls.py data/dls_data.xlsx --distribution intensity  # intensity distribution
+python plot_dls.py data/dls_data.xlsx --zoom-pct 100            # show full range
+```
+
+| Argument           | Meaning |
+|--------------------|---------|
+| `input`            | Path to Zetasizer `.xlsx` file |
+| `--distribution`   | `number` (default) or `intensity` |
+| `--log`            | Plot log(diameter) instead of raw |
+| `--zoom-pct`       | Percent of data to show (default: `95`) |
+
+### Optional: DLS vs fluorescence comparison
+
+Side-by-side comparison of DLS distribution and fluorescence sqrt(A)
+distributions for one or more channels. One panel per channel, all
+independently zoomed. Use this to check whether your detected liposome
+population matches the DLS measurement.
+
+```bash
+python plot_dls_comparison.py \
+    --dls-input data/dls_data.xlsx \
+    --fluor-input data/.../filtered_puncta_A_values.txt \
+    --channels 0 Lipid 1 EGFP \
+    --zoom-pct 95 \
+    --bins 200 \
+    --save-dir figures/
+```
+
+| Argument              | Meaning |
+|-----------------------|---------|
+| `--dls-input`         | DLS `.xlsx` file |
+| `--fluor-input`       | Filtered puncta file |
+| `--channels`          | Index/label pairs: `0 Lipid 1 EGFP`. Index 0 = A_ch1, 1 = A_ch2, etc. |
+| `--dls-distribution`  | `number` (default) or `intensity` for the DLS panel |
+| `--bins`              | Bins for sqrt(A) histograms (default: `100`) |
+| `--zoom-pct`          | Percent of data to show (default: `100` = no zoom) |
+| `--save-dir`          | Output directory |
+
 ## File Descriptions
 
-| File                  | Purpose |
-|-----------------------|---------|
-| `prepare_input.py`    | Split and reorder TIFF channels, organize for MATLAB |
-| `analyze_matlab.py`   | Read MATLAB detection `.mat` files, filter puncta, export TSV |
-| `dls_calibration.py`  | Fit log-normals to DLS + fluorescence data, compute conversion factors |
-| `plot_curvature.py`   | Convert amplitudes to radii, plot protein density vs radius |
-| `plot_histograms.py`  | Plot amplitude histograms and estimated diameter distributions |
-| `plot_overlay.py`     | Overlay normalized curvature-sorting curves across experiments |
-| `requirements.txt`    | Python dependencies: numpy, matplotlib, tifffile, h5py, openpyxl, pandas, scipy |
+| File                      | Purpose |
+|---------------------------|---------|
+| `prepare_input.py`        | Split and reorder TIFF channels, organize for MATLAB |
+| `analyze_matlab.py`       | Read MATLAB detection `.mat` files, filter puncta, export TSV |
+| `dls_calibration.py`      | Fit log-normals to DLS + fluorescence data, compute conversion factors |
+| `plot_curvature.py`       | Convert amplitudes to radii, plot protein density vs radius |
+| `plot_histograms.py`      | Plot amplitude histograms and estimated diameter distributions |
+| `plot_overlay.py`         | Overlay normalized curvature-sorting curves across experiments |
+| `plot_dls.py`             | Plot DLS distribution (number or intensity, raw or log) |
+| `plot_dls_comparison.py`  | Side-by-side DLS vs fluorescence sqrt(A) per channel |
+| `requirements.txt`        | Python dependencies: numpy, matplotlib, tifffile, h5py, openpyxl, pandas, scipy |
 
 ## Notes
 
