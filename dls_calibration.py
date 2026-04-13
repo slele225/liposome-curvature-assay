@@ -174,38 +174,58 @@ def load_sqrt_A(puncta_path, lipid_col="A_ch1", n_bins=80):
 
 # ── Loss functions ──────────────────────────────────────────────────────
 
-def total_loss(params, dls_x, dls_y, fluor_x, fluor_y):
+def make_z_lognormal(dls_x, z_avg, pdi):
     """
-    Combined loss from all three terms.
+    Generate a lognormal distribution from Z-average and PDI.
 
-    params = [A_dls, mu_dls, sigma_dls, A_fluor, mu_fluor, sigma_fluor]
+    The Z-average is the intensity-weighted harmonic mean from the
+    cumulant fit. We use mu = ln(Z_avg) and sigma = sqrt(PDI) as the
+    lognormal parameters, then evaluate on the DLS diameter bins.
     """
-    A_dls, mu_dls, sigma_dls, A_fluor, mu_fluor, sigma_fluor = params
+    mu = np.log(z_avg)
+    sigma = np.sqrt(pdi) if pdi > 0 else 0.3
+    with np.errstate(divide="ignore", invalid="ignore"):
+        logx = np.log(np.clip(dls_x, 1e-12, None))
+        vals = np.exp(-0.5 * ((logx - mu) / sigma) ** 2)
+    # Normalize to same area as a percentage distribution
+    vals = vals / (np.sum(vals) + 1e-12) * 100
+    return vals
 
-    # Enforce positive sigma
+
+def total_loss(params, dls_x, num_y, z_lognormal_y, fluor_x, fluor_y):
+    """
+    Combined loss from all three terms, each normalized to relative error.
+
+    params = [alpha, A_dls, mu_dls, sigma_dls, A_fluor, mu_fluor, sigma_fluor]
+
+    alpha: weight for linear combination
+        pseudo_dls = alpha * number_distribution + (1 - alpha) * z_lognormal
+    """
+    alpha, A_dls, mu_dls, sigma_dls, A_fluor, mu_fluor, sigma_fluor = params
+
+    # Enforce constraints
     if sigma_dls <= 0 or sigma_fluor <= 0:
         return 1e12
     if A_dls <= 0 or A_fluor <= 0:
         return 1e12
+    if alpha < 0 or alpha > 1:
+        return 1e12
 
-    # L1: DLS lognormal fit to empirical DLS
+    # Construct pseudo-DLS as linear combination
+    pseudo_dls = alpha * num_y + (1 - alpha) * z_lognormal_y
+
+    # L1: Lognormal fit to pseudo-DLS (normalized by data magnitude)
     pred_dls = lognormal(dls_x, A_dls, mu_dls, sigma_dls)
-    L1 = np.sum((pred_dls - dls_y) ** 2)
+    L1 = np.sum((pred_dls - pseudo_dls) ** 2) / (np.sum(pseudo_dls ** 2) + 1e-12)
 
-    # L2: Fluorescence lognormal fit to empirical sqrt(A)
+    # L2: Fluorescence lognormal fit to empirical sqrt(A) (normalized)
     pred_fluor = lognormal(fluor_x, A_fluor, mu_fluor, sigma_fluor)
-    L2 = np.sum((pred_fluor - fluor_y) ** 2)
+    L2 = np.sum((pred_fluor - fluor_y) ** 2) / (np.sum(fluor_y ** 2) + 1e-12)
 
     # L3: Consistency between the two lognormals on a shared nm axis
-    # conversion maps fluor x-axis to nm: d_nm = x_fluor * conversion
-    # conversion = exp(mu_dls) / exp(mu_fluor) = exp(mu_dls - mu_fluor)
     conversion = np.exp(mu_dls - mu_fluor)
 
-    # Evaluate both lognormals on the DLS x-axis (nm)
     dls_on_shared = lognormal(dls_x, A_dls, mu_dls, sigma_dls)
-
-    # Convert DLS x-axis to fluor units, evaluate fluor lognormal, then
-    # scale amplitude to match DLS space
     fluor_x_converted = dls_x / conversion
     fluor_on_shared = lognormal(fluor_x_converted, A_fluor, mu_fluor, sigma_fluor)
 
@@ -254,12 +274,14 @@ def main():
         help="Path to filtered_puncta_A_values.txt",
     )
     parser.add_argument(
-        "--z-avg", type=float, required=True,
-        help="Z-average diameter (nm) from Zetasizer cumulants analysis",
+        "--z-avg", type=float, default=None,
+        help="Z-average diameter (nm) from Zetasizer cumulants analysis. "
+             "Required for log-normal fitting. Omit to use ratio-of-means only.",
     )
     parser.add_argument(
-        "--pdi", type=float, required=True,
-        help="PDI from Zetasizer cumulants analysis",
+        "--pdi", type=float, default=None,
+        help="PDI from Zetasizer cumulants analysis. "
+             "Required for log-normal fitting. Omit to use ratio-of-means only.",
     )
     parser.add_argument(
         "--lipid-col", default="A_ch1",
@@ -273,14 +295,29 @@ def main():
         "--save-dir", default=None,
         help="Directory to save overlay plots (default: no plots)",
     )
+    parser.add_argument(
+        "--bootstrap", type=int, default=0,
+        help="Number of bootstrap resamples to compare variance of "
+             "ratio-of-means vs lognormal conversion (default: 0 = off). "
+             "Try 200-500. Requires --z-avg and --pdi.",
+    )
+    parser.add_argument(
+        "--bootstrap-k", type=int, default=None,
+        help="Number of puncta to sample per bootstrap iteration "
+             "(default: same as total puncta count).",
+    )
     args = parser.parse_args()
 
     # ── Load data ───────────────────────────────────────────────────
+    do_lognormal = args.z_avg is not None and args.pdi is not None
+
     print("=" * 60)
-    print("DLS CALIBRATION — LOG-NORMAL FITTING")
+    if do_lognormal:
+        print("DLS CALIBRATION — LOG-NORMAL FITTING")
+    else:
+        print("DLS CALIBRATION — RATIO OF MEANS")
     print("=" * 60)
 
-    dls_x, dls_y = load_dls_intensity(args.dls_input)
     num_x, num_y = load_dls_number(args.dls_input)
     fluor_x, fluor_y, sqrt_A_raw = load_sqrt_A(
         args.fluor_input, args.lipid_col, args.n_bins
@@ -288,14 +325,42 @@ def main():
 
     print(f"DLS file:       {args.dls_input}")
     print(f"Fluor file:     {args.fluor_input}")
-    print(f"Z-average:      {args.z_avg} nm")
-    print(f"PDI:            {args.pdi}")
-    print(f"DLS intensity bins: {len(dls_x)}")
     print(f"DLS number bins:    {len(num_x)}")
     print(f"Fluor bins:     {len(fluor_x)}")
     print(f"Fluor points:   {len(sqrt_A_raw)}")
 
-    # ── Initial guesses ─────────────────────────────────────────────
+    # ── Ratio-of-means (always computed) ────────────────────────────
+    conversion_simple, dls_num_mean, fluor_mean = ratio_of_means_conversion(
+        num_x, num_y, sqrt_A_raw
+    )
+
+    print(f"\n{'=' * 60}")
+    print("RATIO OF MEANS (number distribution)")
+    print(f"{'=' * 60}")
+    print(f"  DLS number-weighted mean:  {dls_num_mean:.2f} nm")
+    print(f"  Mean sqrt(A):              {fluor_mean:.4f}")
+    print(f"  Conversion factor:         {conversion_simple:.6f} nm/sqrt(A)")
+    print(f"\n  python plot_curvature.py --dls-mean-diameter {dls_num_mean:.2f} ...")
+
+    if not do_lognormal:
+        if args.z_avg is None or args.pdi is None:
+            print(f"\nSkipping log-normal fitting (--z-avg and --pdi not provided).")
+            print("Add both to enable log-normal calibration.")
+        return
+
+    # ── Log-normal fitting (pseudo-DLS approach) ──────────────────
+    dls_x, dls_y = num_x, num_y
+
+    # Generate lognormal from Z-avg and PDI (cumulant representation)
+    z_lognormal_y = make_z_lognormal(dls_x, args.z_avg, args.pdi)
+
+    print(f"\n  Z-average:        {args.z_avg} nm")
+    print(f"  PDI:              {args.pdi}")
+    print(f"  DLS number bins:  {len(dls_x)}")
+    print(f"  Pseudo-DLS = alpha * number_dist + (1-alpha) * Z-avg_lognormal")
+
+    # ── Initial guesses (7 params: alpha + 3 DLS + 3 fluor) ────
+    alpha_init = 0.5
     mu_dls_init = np.log(args.z_avg)
     sigma_dls_init = np.sqrt(args.pdi) if args.pdi > 0 else 0.3
     A_dls_init = float(np.max(dls_y))
@@ -305,11 +370,13 @@ def main():
     A_fluor_init = float(np.max(fluor_y))
 
     p0 = [
+        alpha_init,
         A_dls_init, mu_dls_init, sigma_dls_init,
         A_fluor_init, mu_fluor_init, sigma_fluor_init,
     ]
 
     print(f"\nInitial guesses:")
+    print(f"  alpha: {alpha_init}")
     print(f"  DLS:   A={A_dls_init:.2f}, mu={mu_dls_init:.4f}, "
           f"sigma={sigma_dls_init:.4f}")
     print(f"  Fluor: A={A_fluor_init:.2f}, mu={mu_fluor_init:.4f}, "
@@ -319,15 +386,18 @@ def main():
     result = minimize(
         total_loss,
         p0,
-        args=(dls_x, dls_y, fluor_x, fluor_y),
+        args=(dls_x, dls_y, z_lognormal_y, fluor_x, fluor_y),
         method="Nelder-Mead",
-        options={"maxiter": 50000, "xatol": 1e-10, "fatol": 1e-10},
+        options={"maxiter": 100000, "xatol": 1e-10, "fatol": 1e-10},
     )
 
     if not result.success:
         print(f"\nWarning: optimizer did not fully converge: {result.message}")
 
-    A_dls, mu_dls, sigma_dls, A_fluor, mu_fluor, sigma_fluor = result.x
+    alpha, A_dls, mu_dls, sigma_dls, A_fluor, mu_fluor, sigma_fluor = result.x
+
+    # Reconstruct the pseudo-DLS that was actually fit
+    pseudo_dls_final = alpha * dls_y + (1 - alpha) * z_lognormal_y
 
     # ── Conversion factor ───────────────────────────────────────────
     conversion_lognormal = np.exp(mu_dls - mu_fluor)
@@ -342,9 +412,14 @@ def main():
 
     # ── Report ──────────────────────────────────────────────────────
     print(f"\n{'=' * 60}")
-    print("FIT RESULTS")
+    print("LOG-NORMAL FIT RESULTS")
     print(f"{'=' * 60}")
-    print(f"\nDLS log-normal fit:")
+
+    print(f"\nPseudo-DLS mixing:")
+    print(f"  alpha = {alpha:.4f}")
+    print(f"  pseudo-DLS = {alpha:.2f} * number + {1-alpha:.2f} * Z-avg lognormal")
+
+    print(f"\nDLS log-normal fit (to pseudo-DLS):")
     print(f"  A     = {A_dls:.4f}")
     print(f"  mu    = {mu_dls:.6f}")
     print(f"  sigma = {sigma_dls:.6f}")
@@ -358,17 +433,14 @@ def main():
     print(f"  mode  = {mode_fluor:.4f} sqrt(A) units")
     print(f"  median = {np.exp(mu_fluor):.4f} sqrt(A) units")
 
+    print(f"\n  Final loss: {result.fun:.6f}")
+
     print(f"\n{'=' * 60}")
-    print("CONVERSION FACTORS")
+    print("ALL CONVERSION FACTORS")
     print(f"{'=' * 60}")
     print(f"\n  Log-normal (exp(mu_dls - mu_fluor)):  {conversion_lognormal:.6f} nm/sqrt(A)")
     print(f"  Mode ratio (mode_dls / mode_fluor):   {conversion_mode_ratio:.6f} nm/sqrt(A)")
-    print(f"  Simple ratio of means (old method):   {conversion_simple:.6f} nm/sqrt(A)")
-
-    print(f"\n  DLS number-weighted mean:       {dls_num_mean:.2f} nm")
-    print(f"  Mean sqrt(A):                  {fluor_mean:.4f}")
-
-    print(f"\n  Final loss: {result.fun:.6f}")
+    print(f"  Ratio of means (number distribution): {conversion_simple:.6f} nm/sqrt(A)")
 
     print(f"\n{'=' * 60}")
     print("USE IN PIPELINE")
@@ -385,20 +457,25 @@ def main():
     if args.save_dir:
         os.makedirs(args.save_dir, exist_ok=True)
 
-        # Plot 1: DLS fit
+        # Plot 1: Pseudo-DLS and fit
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
         ax = axes[0]
-        ax.plot(dls_x, dls_y, "o", markersize=3, alpha=0.6, label="DLS data")
+        ax.plot(dls_x, pseudo_dls_final, "o", markersize=3, alpha=0.6,
+                label="Pseudo-DLS")
+        ax.plot(dls_x, dls_y, "s", markersize=2, alpha=0.3, color="gray",
+                label="Number dist")
+        ax.plot(dls_x, z_lognormal_y, "--", color="gray", alpha=0.4,
+                linewidth=1, label="Z-avg lognormal")
         d_fine = np.linspace(dls_x.min(), dls_x.max(), 500)
         ax.plot(d_fine, lognormal(d_fine, A_dls, mu_dls, sigma_dls),
                 "r-", linewidth=2, label="Log-normal fit")
         ax.axvline(mode_dls, color="green", linestyle="--", linewidth=1,
                    label=f"Mode = {mode_dls:.1f} nm")
         ax.set_xlabel("Diameter (nm)")
-        ax.set_ylabel("Intensity (%)")
-        ax.set_title("DLS Intensity Distribution")
-        ax.legend(fontsize=8)
+        ax.set_ylabel("Number (%)")
+        ax.set_title(f"Pseudo-DLS (α={alpha:.2f})")
+        ax.legend(fontsize=7)
         ax.grid(True, alpha=0.2)
 
         # Plot 2: Fluorescence fit
@@ -439,6 +516,106 @@ def main():
         fig.savefig(save_path, dpi=300)
         plt.close(fig)
         print(f"\nPlots saved to {save_path}")
+
+    # ── Bootstrap variance comparison ──────────────────────────────
+    if args.bootstrap > 0 and do_lognormal:
+        n_boot = args.bootstrap
+        k = args.bootstrap_k or len(sqrt_A_raw)
+        rng = np.random.default_rng(42)
+
+        print(f"\n{'=' * 60}")
+        print(f"BOOTSTRAP VARIANCE COMPARISON (n={n_boot}, k={k})")
+        print(f"{'=' * 60}")
+
+        rom_factors = []
+        ln_factors = []
+        mode_factors = []
+
+        for b in range(n_boot):
+            # Resample fluorescence data
+            sample = rng.choice(sqrt_A_raw, size=k, replace=True)
+
+            # Ratio-of-means
+            rom = dls_num_mean / np.mean(sample)
+            rom_factors.append(rom)
+
+            # Lognormal: re-histogram and re-optimize
+            counts_b, edges_b = np.histogram(sample, bins=args.n_bins)
+            centers_b = 0.5 * (edges_b[:-1] + edges_b[1:])
+            counts_b = counts_b.astype(float)
+
+            p0_b = [
+                alpha,  # use previous alpha as init
+                A_dls, mu_dls, sigma_dls,  # DLS side doesn't change
+                float(np.max(counts_b)),
+                float(np.log(np.mean(sample))),
+                float(np.std(np.log(sample))),
+            ]
+
+            try:
+                res_b = minimize(
+                    total_loss,
+                    p0_b,
+                    args=(dls_x, dls_y, z_lognormal_y, centers_b, counts_b),
+                    method="Nelder-Mead",
+                    options={"maxiter": 50000, "xatol": 1e-8, "fatol": 1e-8},
+                )
+                _, _, mu_d_b, _, _, mu_f_b, sigma_f_b = res_b.x
+                ln_factors.append(np.exp(mu_d_b - mu_f_b))
+                mode_factors.append(
+                    lognormal_mode(mu_d_b, res_b.x[3]) /
+                    lognormal_mode(mu_f_b, sigma_f_b)
+                )
+            except Exception:
+                pass  # skip failed optimizations
+
+            if (b + 1) % 50 == 0 or b == 0:
+                print(f"  Bootstrap {b+1}/{n_boot}...")
+
+        rom_factors = np.array(rom_factors)
+        ln_factors = np.array(ln_factors)
+        mode_factors = np.array(mode_factors)
+
+        print(f"\n  Ratio-of-means:  mean={np.mean(rom_factors):.4f}, "
+              f"std={np.std(rom_factors):.4f}, "
+              f"CV={np.std(rom_factors)/np.mean(rom_factors)*100:.2f}%")
+        print(f"  Log-normal:      mean={np.mean(ln_factors):.4f}, "
+              f"std={np.std(ln_factors):.4f}, "
+              f"CV={np.std(ln_factors)/np.mean(ln_factors)*100:.2f}%")
+        print(f"  Mode ratio:      mean={np.mean(mode_factors):.4f}, "
+              f"std={np.std(mode_factors):.4f}, "
+              f"CV={np.std(mode_factors)/np.mean(mode_factors)*100:.2f}%")
+
+        # Plot bootstrap distributions
+        if args.save_dir:
+            fig, ax = plt.subplots(figsize=(10, 5))
+            bins_hist = 40
+
+            ax.hist(rom_factors, bins=bins_hist, alpha=0.5, color="blue",
+                    label=f"Ratio-of-means (CV={np.std(rom_factors)/np.mean(rom_factors)*100:.1f}%)",
+                    density=True)
+            ax.hist(ln_factors, bins=bins_hist, alpha=0.5, color="red",
+                    label=f"Log-normal (CV={np.std(ln_factors)/np.mean(ln_factors)*100:.1f}%)",
+                    density=True)
+            ax.hist(mode_factors, bins=bins_hist, alpha=0.5, color="green",
+                    label=f"Mode ratio (CV={np.std(mode_factors)/np.mean(mode_factors)*100:.1f}%)",
+                    density=True)
+
+            ax.axvline(np.mean(rom_factors), color="blue", linestyle="--", linewidth=1.5)
+            ax.axvline(np.mean(ln_factors), color="red", linestyle="--", linewidth=1.5)
+            ax.axvline(np.mean(mode_factors), color="green", linestyle="--", linewidth=1.5)
+
+            ax.set_xlabel("Conversion factor (nm / sqrt(A))")
+            ax.set_ylabel("Density")
+            ax.set_title(f"Bootstrap Comparison (n={n_boot}, k={k})")
+            ax.legend(fontsize=9)
+            ax.grid(True, alpha=0.2)
+            fig.tight_layout()
+
+            boot_path = os.path.join(args.save_dir, "bootstrap_variance.png")
+            fig.savefig(boot_path, dpi=300)
+            plt.close(fig)
+            print(f"\n  Bootstrap plot saved to {boot_path}")
 
 
 if __name__ == "__main__":
