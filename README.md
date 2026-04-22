@@ -110,10 +110,10 @@ The assay works like this:
 3. **Calibrate sizes** — Dynamic light scattering (DLS) gives the true size
    distribution of the liposome stock. By comparing the mean DLS diameter to
    the mean sqrt(lipid amplitude), you get a conversion factor from
-   fluorescence amplitude to physical radius.
+   fluorescence amplitude to physical diameter.
 4. **Compute curvature sorting** — For each punctum, convert lipid amplitude
-   to liposome radius, then compute protein surface density =
-   protein_A / (4πR²).
+   to liposome diameter, then compute protein surface density =
+   protein_A / (πD²).
 
 ## Pipeline
 
@@ -347,7 +347,7 @@ puncta were detected.
 ### Optional: Normalized overlay across experiments
 
 Compare curvature sorting across conditions by normalizing each curve so
-the largest-radius bin = 1 (fold-enrichment at high curvature). Each input
+the largest-diameter bin = 1 (fold-enrichment at high curvature). Each input
 file gets its own conversion factor (from `dls_calibration.py`).
 
 ```bash
@@ -362,6 +362,7 @@ python plot_overlay.py \
 | `--input`       | Files with conversion factors, as `file.txt:factor` pairs |
 | `--labels`      | Custom legend labels (default: parent folder name) |
 | `--bin-width`   | Radius bin width in nm (default: `0.5`) |
+| `--diameter-cutoff` | Exclude puncta with diameter above this value in nm. Useful for filtering sparse large-diameter tail (optional) |
 | `--output-name` | Output filename (default: `normalized_curvature_overlay.png`) |
 | `--save-dir`    | Output directory for figure |
 
@@ -421,7 +422,7 @@ python plot_dls_comparison.py \
 | `prepare_input.py`        | Split and reorder TIFF channels, organize for MATLAB |
 | `analyze_matlab.py`       | Read MATLAB detection `.mat` files, filter puncta, export TSV |
 | `dls_calibration.py`      | DLS-fluorescence distribution overlay to compute conversion factor |
-| `plot_curvature.py`       | Convert amplitudes to radii, plot protein density vs radius |
+| `plot_curvature.py`       | Convert amplitudes to diameters, plot protein density vs diameter |
 | `plot_histograms.py`      | Plot amplitude histograms and estimated diameter distributions |
 | `plot_overlay.py`         | Overlay normalized curvature-sorting curves across experiments |
 | `plot_dls.py`             | Plot DLS distribution (number or intensity, raw or log) |

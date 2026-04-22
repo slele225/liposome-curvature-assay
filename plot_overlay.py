@@ -2,9 +2,9 @@
 Overlay normalized curvature-sorting curves from multiple experiments.
 
 Reads multiple filtered puncta A-value files (each with its own conversion
-factor from dls_calibration.py), computes protein surface density vs. radius
+factor from dls_calibration.py), computes protein surface density vs. diameter
 for each, bins the data, normalizes each curve so the rightmost bin
-(largest radius, lowest curvature) = 1, and overlays just the binned
+(largest diameter, lowest curvature) = 1, and overlays just the binned
 averages on a single plot.
 
 The y-axis shows fold-enrichment at high curvature relative to flat
@@ -55,29 +55,27 @@ def load_puncta_file(path, lipid_col, protein_col):
 
 # ── Core computation ────────────────────────────────────────────────────
 
-def amplitude_to_radius(lipid_A, conversion_factor):
+def amplitude_to_diameter(lipid_A, conversion_factor):
     """
-    Convert lipid amplitudes to physical radii (nm).
+    Convert lipid amplitudes to physical diameters (nm).
 
     diameter = sqrt(lipid_A) * conversion_factor
-    radius = diameter / 2
     """
     lipid_A = np.clip(lipid_A, 0, None)
     sqrt_lipid = np.sqrt(lipid_A)
-    diameter = sqrt_lipid * conversion_factor
-    return diameter / 2.0
+    return sqrt_lipid * conversion_factor
 
 
-def compute_density(protein_A, radius_nm):
-    """Protein surface density = protein_A / (4piR^2)."""
-    surface_area = 4.0 * np.pi * (radius_nm ** 2)
+def compute_density(protein_A, diameter_nm):
+    """Protein surface density = protein_A / (π D²)."""
+    surface_area = np.pi * (diameter_nm ** 2)
     density = protein_A / (surface_area + EPS)
 
     valid = np.isfinite(density) & (surface_area > 0)
     return density, valid
 
 
-def bin_by_radius(x, y, bin_width):
+def bin_by_diameter(x, y, bin_width):
     """Equal-width bins, returns centres and mean y."""
     edges = np.arange(np.min(x), np.max(x) + bin_width, bin_width)
     centres, means = [], []
@@ -189,6 +187,13 @@ def main():
         help="Custom labels for each curve (default: parent folder name)",
     )
     parser.add_argument(
+        "--diameter-cutoff",
+        type=float,
+        default=None,
+        help="Exclude puncta with diameter above this value (nm). "
+             "Useful for filtering sparse large-diameter tail.",
+    )
+    parser.add_argument(
         "--save-dir",
         default="figures/",
         help="Output directory for figure (default: figures/)",
@@ -233,13 +238,21 @@ def main():
                 path, args.lipid_col, args.protein_col
             )
 
-            radius = amplitude_to_radius(lipid_A, conv_factor)
-            density, valid = compute_density(protein_A, radius)
+            diameter = amplitude_to_diameter(lipid_A, conv_factor)
+            density, valid = compute_density(protein_A, diameter)
 
-            x = radius[valid]
+            x = diameter[valid]
             y = density[valid]
 
-            bx, by = bin_by_radius(x, y, args.bin_width)
+            if args.diameter_cutoff is not None:
+                cutoff_mask = x <= args.diameter_cutoff
+                n_before = len(x)
+                x = x[cutoff_mask]
+                y = y[cutoff_mask]
+                print(f"  Diameter cutoff at {args.diameter_cutoff} nm: "
+                      f"{n_before} -> {len(x)} points")
+
+            bx, by = bin_by_diameter(x, y, args.bin_width)
             by_norm = normalize_to_rightmost(bx, by)
 
             if args.labels:
@@ -272,7 +285,7 @@ def main():
         )
 
     ax.axhline(1.0, color="gray", linestyle="--", linewidth=0.8, alpha=0.5)
-    ax.set_xlabel("Liposome radius (nm)")
+    ax.set_xlabel("Liposome diameter (nm)")
     ax.set_ylabel("Normalized protein density (fold enrichment)")
     ax.set_title("Curvature Sorting \u2014 Normalized Overlay")
     ax.legend(fontsize=9)
