@@ -185,6 +185,13 @@ def main():
         help="Diameter bin width in nm for averaged curve (default: 0.5)",
     )
     parser.add_argument(
+        "--diameter-cutoff",
+        type=float,
+        default=None,
+        help="Exclude puncta with diameter above this value (nm). "
+             "Useful for filtering sparse large-diameter tail.",
+    )
+    parser.add_argument(
         "--save-dir",
         default=None,
         help="Output directory for figures (default: same folder as input)",
@@ -215,6 +222,14 @@ def main():
 
             x = diameter[valid]
             y = density[valid]
+
+            if args.diameter_cutoff is not None:
+                cutoff_mask = x <= args.diameter_cutoff
+                n_before = len(x)
+                x = x[cutoff_mask]
+                y = y[cutoff_mask]
+                print(f"  Diameter cutoff at {args.diameter_cutoff} nm: "
+                      f"{n_before} -> {len(x)} points")
 
             print(f"\nFile: {path}")
             print(f"  Scale factor: {scale:.6f} nm / sqrt(A)")

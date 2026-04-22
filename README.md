@@ -252,7 +252,8 @@ python plot_curvature.py \
 | `--dls-mean-diameter` | Alternative: mean diameter in nm (uses ratio-of-means internally) |
 | `--lipid-col`         | Column for lipid amplitude (default: `A_ch1`) |
 | `--protein-col`       | Column for protein amplitude (default: `A_ch2`) |
-| `--bin-width`         | Radius bin width in nm for averaged curve (default: `0.5`) |
+| `--bin-width`         | Diameter bin width in nm for averaged curve (default: `0.5`) |
+| `--diameter-cutoff`   | Exclude puncta with diameter above this value in nm. Useful for filtering sparse large-diameter tail (optional) |
 | `--save-dir`          | Output directory for figures |
 
 Provide exactly one of `--conversion-factor` or `--dls-mean-diameter`.
