@@ -6,7 +6,7 @@ physical diameter in nm by minimizing the chi-squared difference between
 the rebinned fluorescence histogram and the DLS number-weighted size
 distribution.
 
-    diameter = sqrt(A) / k
+    diameter = sqrt(A) * k
 
 This is the calibration procedure introduced by Kunding et al. (2008),
 simplified by Hatzakis et al. (2009) as d = Ccal * sqrt(I), and used in
@@ -134,11 +134,11 @@ def overlay_cost(k, sqrt_A, dls_edges, dls_density_norm, dls_widths):
     """
     Chi-squared cost for a candidate conversion factor k.
 
-    Converts sqrt(A) to trial diameters via D = sqrt(A) / k,
+    Converts sqrt(A) to trial diameters via D = sqrt(A) * k,
     histograms them on the DLS bin grid, peak-normalizes both
     density distributions, and returns sum of squared residuals.
     """
-    D_trial = sqrt_A / k
+    D_trial = sqrt_A * k
 
     fluor_counts, _ = np.histogram(D_trial, bins=dls_edges)
     fluor_density = fluor_counts.astype(float) / dls_widths
@@ -251,30 +251,24 @@ def main():
 
     k_best = result.x
 
-    # Conversion factor: diameter = sqrt(A) * conversion_factor
-    # Since diameter = sqrt(A) / k, conversion_factor = 1/k
-    conversion_factor = 1.0 / k_best
-
-    # Implied mean diameter for --dls-mean-diameter usage
-    mean_diameter_overlay = float(np.mean(sqrt_A)) / k_best
+    # k_best IS the conversion factor: diameter = sqrt(A) * k_best
+    mean_diameter_overlay = float(np.mean(sqrt_A)) * k_best
 
     print(f"\n{'=' * 60}")
     print("DISTRIBUTION OVERLAY RESULT")
     print(f"{'=' * 60}")
-    print(f"  k (sqrt(A) per nm):          {k_best:.6f}")
-    print(f"  conversion (nm per sqrt(A)): {conversion_factor:.6f}")
+    print(f"  k (nm per sqrt(A)):          {k_best:.6f}")
     print(f"  Implied mean diameter:       {mean_diameter_overlay:.2f} nm")
     print(f"  Chi-squared residual:        {result.fun:.6f}")
 
-    rom_conv = 1.0 / rom_factor
-    pct_diff = abs(conversion_factor - rom_conv) / rom_conv * 100
-    print(f"\n  Ratio-of-means conversion:   {rom_conv:.6f}  "
+    pct_diff = abs(k_best - rom_factor) / rom_factor * 100
+    print(f"\n  Ratio-of-means factor:       {rom_factor:.6f}  "
           f"({pct_diff:.1f}% difference from overlay)")
 
     print(f"\n{'=' * 60}")
     print("USE IN PIPELINE")
     print(f"{'=' * 60}")
-    print(f"\n  python plot_curvature.py --conversion-factor {conversion_factor:.6f} ...")
+    print(f"\n  python plot_curvature.py --conversion-factor {k_best:.6f} ...")
     print(f"\n  Equivalently, using mean diameter:")
     print(f"  python plot_curvature.py --dls-mean-diameter {mean_diameter_overlay:.2f} ...")
 
@@ -283,7 +277,7 @@ def main():
         os.makedirs(args.save_dir, exist_ok=True)
 
         # Fluorescence histogram on DLS grid at k_best
-        D_best = sqrt_A / k_best
+        D_best = sqrt_A * k_best
         fluor_counts, _ = np.histogram(D_best, bins=edges)
         fluor_density = fluor_counts.astype(float) / widths
         fluor_density_norm = fluor_density / (fluor_density.max() or 1)
@@ -322,7 +316,7 @@ def main():
 
         # Second x-axis for nm
         ax2 = ax.twiny()
-        ax2.set_xlim(ax.get_xlim()[0] / k_best, ax.get_xlim()[1] / k_best)
+        ax2.set_xlim(ax.get_xlim()[0] * k_best, ax.get_xlim()[1] * k_best)
         ax2.set_xlabel("Diameter (nm)")
 
         ax.legend(fontsize=8)
@@ -364,7 +358,7 @@ def main():
                 method="bounded",
                 options={"xatol": 1e-10},
             )
-            overlay_factors.append(1.0 / res_b.x)
+            overlay_factors.append(res_b.x)
 
             if (b + 1) % 50 == 0 or b == 0:
                 print(f"  Bootstrap {b+1}/{n_boot}...")
