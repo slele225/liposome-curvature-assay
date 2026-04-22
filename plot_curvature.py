@@ -1,9 +1,9 @@
 """
-Plot protein surface density vs. liposome radius (curvature sorting).
+Plot protein surface density vs. liposome diameter (curvature sorting).
 
 Reads the filtered puncta A-value file produced by analyze_matlab.py,
-converts lipid amplitude → physical radius using a DLS-derived mean
-diameter, then plots protein_A / (4πR²) vs R with binned averages.
+converts lipid amplitude → physical diameter using a DLS-derived mean
+diameter, then plots protein_A / (πD²) vs D with binned averages.
 """
 
 import os
@@ -59,10 +59,10 @@ def load_puncta_file(path: str, lipid_col: str, protein_col: str):
 
 # ── Core computation ────────────────────────────────────────────────────
 
-def amplitude_to_radius(lipid_A: np.ndarray, dls_mean_diameter_nm: float = None,
-                        conversion_factor: float = None):
+def amplitude_to_diameter(lipid_A: np.ndarray, dls_mean_diameter_nm: float = None,
+                         conversion_factor: float = None):
     """
-    Convert lipid amplitudes to physical radii (nm).
+    Convert lipid amplitudes to physical diameters (nm).
 
     Two modes:
       1. --dls-mean-diameter: ratio-of-means method
@@ -72,7 +72,7 @@ def amplitude_to_radius(lipid_A: np.ndarray, dls_mean_diameter_nm: float = None,
       2. --conversion-factor: direct mapping from sqrt(A) to diameter
          diameter = sqrt(lipid_A) * conversion_factor
 
-    Returns (radius_nm, scale_factor).
+    Returns (diameter_nm, scale_factor).
     """
     lipid_A = np.clip(lipid_A, 0, None)
     sqrt_lipid = np.sqrt(lipid_A)
@@ -88,20 +88,19 @@ def amplitude_to_radius(lipid_A: np.ndarray, dls_mean_diameter_nm: float = None,
         raise ValueError("Must provide either dls_mean_diameter or conversion_factor.")
 
     diameter_nm = sqrt_lipid * scale
-    radius_nm = diameter_nm / 2.0
-    return radius_nm, scale
+    return diameter_nm, scale
 
 
-def compute_protein_density(protein_A: np.ndarray, radius_nm: np.ndarray):
-    """Protein surface density = protein_A / (4 π R²)."""
-    surface_area = 4.0 * np.pi * (radius_nm ** 2)
+def compute_protein_density(protein_A: np.ndarray, diameter_nm: np.ndarray):
+    """Protein surface density = protein_A / (π D²)."""
+    surface_area = np.pi * (diameter_nm ** 2)
     density = protein_A / (surface_area + EPS)
 
     valid = np.isfinite(density) & (surface_area > 0)
     return density, valid
 
 
-def bin_by_radius(x: np.ndarray, y: np.ndarray, bin_width: float):
+def bin_by_diameter(x: np.ndarray, y: np.ndarray, bin_width: float):
     """Equal-width bins along x, returning bin centres and mean y."""
     edges = np.arange(np.min(x), np.max(x) + bin_width, bin_width)
     centres, means = [], []
@@ -123,8 +122,8 @@ def make_plot(x, y, bx, by, title, save_path, bin_width):
     ax.scatter(x, y, s=6, alpha=0.08, label="Individual puncta")
     ax.scatter(bx, by, s=30, zorder=5, label=f"{bin_width} nm bin mean")
 
-    ax.set_xlabel("Liposome radius (nm)")
-    ax.set_ylabel("Protein surface density:  A / (4πR²)  [A per nm²]")
+    ax.set_xlabel("Liposome diameter (nm)")
+    ax.set_ylabel("Protein surface density:  A / (πD²)  [A per nm²]")
     ax.set_title(title)
     ax.grid(True, alpha=0.2)
     ax.legend()
@@ -183,7 +182,7 @@ def main():
         "--bin-width",
         type=float,
         default=0.5,
-        help="Bin width in nm for averaged curve (default: 0.5)",
+        help="Diameter bin width in nm for averaged curve (default: 0.5)",
     )
     parser.add_argument(
         "--save-dir",
@@ -207,31 +206,31 @@ def main():
                 path, args.lipid_col, args.protein_col
             )
 
-            radius, scale = amplitude_to_radius(
+            diameter, scale = amplitude_to_diameter(
                 lipid_A,
                 dls_mean_diameter_nm=args.dls_mean_diameter,
                 conversion_factor=args.conversion_factor,
             )
-            density, valid = compute_protein_density(protein_A, radius)
+            density, valid = compute_protein_density(protein_A, diameter)
 
-            x = radius[valid]
+            x = diameter[valid]
             y = density[valid]
 
             print(f"\nFile: {path}")
             print(f"  Scale factor: {scale:.6f} nm / sqrt(A)")
             print(f"  Points plotted: {len(x)}")
 
-            bx, by = bin_by_radius(x, y, args.bin_width)
+            bx, by = bin_by_diameter(x, y, args.bin_width)
 
             # Build output path
             parent = os.path.basename(os.path.dirname(path))
             save_dir = args.save_dir or os.path.dirname(path)
             os.makedirs(save_dir, exist_ok=True)
 
-            save_name = f"{parent}__protein_density_vs_radius.png"
+            save_name = f"{parent}__protein_density_vs_diameter.png"
             save_path = os.path.join(save_dir, save_name)
 
-            title = f"Protein surface density vs radius\n{parent}"
+            title = f"Protein surface density vs diameter\n{parent}"
             make_plot(x, y, bx, by, title, save_path, args.bin_width)
 
         except Exception as e:
