@@ -291,73 +291,57 @@ python plot_histograms.py \
 
 ### Optional: DLS calibration
 
-Fits log-normal distributions to a pseudo-DLS target and the fluorescence
-sqrt(A) distribution simultaneously, producing conversion factors that map
-sqrt(amplitude) to physical diameter in nm. The pseudo-DLS target is a
-linear combination `alpha * number_distribution + (1-alpha) * Z-avg_lognormal`
-where alpha is a free parameter optimized alongside the fits. This blends the
-measured number distribution with the cumulant-derived lognormal to compensate
-for noise in either representation. The optimizer fits 7 parameters total:
-alpha, A_dls, mu_dls, sigma_dls, A_fluor, mu_fluor, sigma_fluor. Losses L1
-and L2 are normalized (divided by sum of target data squared) so the DLS and
-fluorescence terms contribute on comparable scales.
+Computes a single scalar conversion factor that maps `sqrt(lipid amplitude)`
+to physical diameter in nm. The script finds this factor by **overlaying**
+the fluorescence sqrt(A) distribution onto the DLS number-weighted size
+distribution — rebinning the fluorescence data onto the DLS bin grid and
+minimizing the chi-squared difference. This formalizes the standard SLiC
+calibration approach (Kunding 2008, Hatzakis 2009, Bhatia 2009, Zeno 2018,
+Johnson 2025), which uses a single scalar to convert sqrt(intensity) to
+diameter.
 
-Also computes the simple ratio-of-means conversion (from the number
-distribution) for comparison. If `--z-avg` and `--pdi` are omitted, only
-the ratio-of-means is computed.
+The ratio-of-means (DLS mean / mean(sqrt(A))) is also reported as a quick
+sanity check. The two typically agree to within a few percent; the overlay
+is more robust because it fits the full distribution shape rather than just
+the first moment.
 
 **DLS data preparation:** Export the size distribution from the Malvern
-Zetasizer software and copy it into an Excel spreadsheet. The spreadsheet
-must have the standard Zetasizer format with "X Intensity", "X Volume",
-and "X Number" section headers. The script reads the number distribution
-for both the pseudo-DLS target and ratio-of-means. You also need the
-Z-average and PDI from the Zetasizer cumulants summary report (for
-log-normal fitting).
+Zetasizer software and copy it into an Excel spreadsheet with the standard
+Zetasizer format ("X Intensity", "X Volume", "X Number" section headers).
+Only the number distribution is used.
 
 ```bash
-# Full log-normal fitting (recommended)
+# Standard usage
 python dls_calibration.py \
     --dls-input data/dls_data.xlsx \
     --fluor-input data/.../filtered_puncta_A_values.txt \
-    --z-avg 131.0 \
-    --pdi 0.08 \
     --save-dir figures/
 
-# Ratio-of-means only (if Z-avg/PDI not available)
-python dls_calibration.py \
-    --dls-input data/dls_data.xlsx \
-    --fluor-input data/.../filtered_puncta_A_values.txt
-
-# With bootstrap variance comparison
+# With bootstrap variance estimate
 python dls_calibration.py \
     --dls-input data/dls_data.xlsx \
     --fluor-input data/.../filtered_puncta_A_values.txt \
-    --z-avg 131.0 \
-    --pdi 0.08 \
-    --bootstrap 300 \
-    --bootstrap-k 500 \
+    --bootstrap 200 \
     --save-dir figures/
 ```
 
-| Argument         | Meaning |
-|------------------|---------|
-| `--dls-input`    | Path to Zetasizer `.xlsx` export |
-| `--fluor-input`  | Path to `filtered_puncta_A_values.txt` from Step 3 |
-| `--z-avg`        | Z-average diameter (nm). Optional — needed for log-normal fitting |
-| `--pdi`          | Polydispersity index. Optional — needed for log-normal fitting |
-| `--lipid-col`    | Column name for lipid amplitude (default: `A_ch1`) |
-| `--n-bins`       | Bins for sqrt(A) histogram (default: `80`) |
-| `--save-dir`     | Save overlay plots (optional) |
-| `--bootstrap`    | Number of bootstrap resamples to compare variance across methods (default: `0` = off). Requires `--z-avg` and `--pdi` |
-| `--bootstrap-k`  | Puncta to sample per bootstrap iteration (default: total puncta count) |
+| Argument          | Meaning |
+|-------------------|---------|
+| `--dls-input`     | Path to Zetasizer `.xlsx` export |
+| `--fluor-input`   | Path to `filtered_puncta_A_values.txt` from Step 3 |
+| `--bootstrap N`   | Bootstrap resamples for variance estimate (default: `0` = off) |
+| `--bootstrap-k K` | Puncta per bootstrap iteration (default: same as total) |
+| `--lipid-col`     | Column name for lipid amplitude (default: `A_ch1`) |
+| `--save-dir`      | Save overlay plots (optional) |
 
-Outputs up to three conversion factors (sqrt(A) → diameter in nm): the
-log-normal `exp(mu_dls - mu_fluor)`, the mode ratio, and the simple
-ratio-of-means (from the number distribution). Use the log-normal
-conversion with `--conversion-factor` in the plotting scripts, or the
-ratio-of-means with `--dls-mean-diameter`. The `--bootstrap` flag
-resamples the fluorescence data and re-fits each method, reporting mean,
-std, and CV for each conversion factor.
+**Using the output:** The script prints a conversion factor and an implied
+mean diameter. Use `--conversion-factor` in the plotting scripts, or
+equivalently `--dls-mean-diameter` with the implied mean.
+
+**Bootstrap:** If you run with `--bootstrap`, the script resamples puncta
+with replacement N times and compares the CV of the overlay vs ratio-of-means
+conversion factors. A lower CV means the method is more robust to which
+puncta were detected.
 
 ### Optional: Normalized overlay across experiments
 
@@ -435,7 +419,7 @@ python plot_dls_comparison.py \
 |---------------------------|---------|
 | `prepare_input.py`        | Split and reorder TIFF channels, organize for MATLAB |
 | `analyze_matlab.py`       | Read MATLAB detection `.mat` files, filter puncta, export TSV |
-| `dls_calibration.py`      | Pseudo-DLS log-normal calibration with bootstrap variance comparison |
+| `dls_calibration.py`      | DLS-fluorescence distribution overlay to compute conversion factor |
 | `plot_curvature.py`       | Convert amplitudes to radii, plot protein density vs radius |
 | `plot_histograms.py`      | Plot amplitude histograms and estimated diameter distributions |
 | `plot_overlay.py`         | Overlay normalized curvature-sorting curves across experiments |
@@ -453,18 +437,15 @@ python plot_dls_comparison.py \
 - **Only the master/lipid channel** (ch1) gets a `Detection/` subfolder from
   CMEanalysis. The protein channel (ch2) will just contain the TIFF.
 - **DLS data preparation:** Export the size distribution from the Malvern
-  Zetasizer software. The spreadsheet must include the number distribution
-  (used for both the pseudo-DLS target and ratio-of-means). Copy into an
-  Excel file with the standard Zetasizer section headers ("X Intensity",
-  "X Volume", "X Number").
-- **DLS calibration** supports two methods: a pseudo-DLS log-normal fit
-  (blends the number distribution with a Z-avg/PDI-derived lognormal,
-  optimizes 7 parameters including a mixing weight alpha) and a simple
-  ratio-of-means fallback. Z-avg and PDI are optional — omit both to get
-  only ratio-of-means. The log-normal method outputs a conversion factor
-  for `--conversion-factor`; the simple method outputs a mean diameter for
-  `--dls-mean-diameter`. Use `--bootstrap N` to compare variance across
-  methods via resampling.
+  Zetasizer software. The spreadsheet must include the number distribution.
+  Copy it into an Excel file with the standard Zetasizer section headers
+  ("X Intensity", "X Volume", "X Number").
+- **DLS calibration** uses a distribution overlay approach: the script
+  rebins the fluorescence sqrt(A) data onto the DLS bin grid and finds the
+  single scalar k that minimizes the chi-squared difference between the two
+  distributions. This is the standard SLiC calibration procedure used from
+  Kunding 2008 through Johnson/Zeno 2025. The ratio-of-means is also
+  reported as a sanity check. See `DLS_Calibration_Notes.md` for background.
 - **Lipid-only experiments** are fully supported. Run `analyze_matlab.py`
   with `--channels ch1 --lipid-channel ch1`, then use `plot_histograms.py`
   (skip `plot_curvature.py` since it requires protein data).

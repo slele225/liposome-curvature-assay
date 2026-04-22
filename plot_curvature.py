@@ -129,6 +129,13 @@ def make_plot(x, y, bx, by, title, save_path, bin_width):
     ax.grid(True, alpha=0.2)
     ax.legend()
 
+    # Fit y-axis to bin means so the trend isn't squashed by scatter outliers
+    if len(by) > 0:
+        y_pad = (by.max() - by.min()) * 0.3
+        if y_pad == 0:
+            y_pad = by.max() * 0.3
+        ax.set_ylim(by.min() - y_pad, by.max() + y_pad)
+
     fig.tight_layout()
     fig.savefig(save_path, dpi=300)
     plt.close(fig)
@@ -159,7 +166,7 @@ def main():
         type=float,
         default=None,
         help="Direct conversion factor: diameter_nm = sqrt(A) * factor. "
-             "From dls_calibration.py log-normal fitting. "
+             "From dls_calibration.py. "
              "Provide this OR --dls-mean-diameter, not both.",
     )
     parser.add_argument(
