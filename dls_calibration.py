@@ -282,7 +282,20 @@ def main():
         fluor_density = fluor_counts.astype(float) / widths
         fluor_density_norm = fluor_density / (fluor_density.max() or 1)
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+        # Find the bin range where DLS or fluorescence has density > 1% of peak
+        threshold = 0.01
+        dls_mass = dls_density_norm > threshold
+        fluor_mass = fluor_density_norm > threshold
+        has_mass = dls_mass | fluor_mass
+
+        x_min, x_max = None, None
+        if has_mass.any():
+            first_idx = np.argmax(has_mass)
+            last_idx = len(has_mass) - 1 - np.argmax(has_mass[::-1])
+            x_min = num_x[first_idx] * 0.7
+            x_max = num_x[last_idx] * 1.5
 
         # Left: overlay on DLS grid
         ax = axes[0]
@@ -296,6 +309,9 @@ def main():
         ax.axvline(mean_diameter_overlay, color="red", linestyle=":",
                    alpha=0.5,
                    label=f"Fluor mean = {mean_diameter_overlay:.1f} nm")
+        ax.set_xscale('log')
+        if x_min is not None:
+            ax.set_xlim(x_min, x_max)
         ax.set_xlabel("Diameter (nm)")
         ax.set_ylabel("Normalized density")
         ax.set_title("Distribution Overlay")
@@ -314,9 +330,12 @@ def main():
         ax.set_ylabel("Count")
         ax.set_title("Fluorescence sqrt(A) Distribution")
 
-        # Second x-axis for nm
+        # Second x-axis for nm, clipped to same range as left panel
         ax2 = ax.twiny()
-        ax2.set_xlim(ax.get_xlim()[0] * k_best, ax.get_xlim()[1] * k_best)
+        if x_min is not None:
+            ax2.set_xlim(x_min, x_max)
+        else:
+            ax2.set_xlim(ax.get_xlim()[0] * k_best, ax.get_xlim()[1] * k_best)
         ax2.set_xlabel("Diameter (nm)")
 
         ax.legend(fontsize=8)
