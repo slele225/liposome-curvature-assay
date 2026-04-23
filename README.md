@@ -9,6 +9,15 @@ for sub-diffraction-limit spot detection.
 > (`Single_Liposome_Curvature_Assay_Protocol.docx`) for beginner-friendly
 > instructions with troubleshooting.
 
+## For Non-Coders
+
+If you're a wet-lab user running this pipeline for the first time and
+you've never used Python or the command line, start with
+**[PROTOCOL.md](PROTOCOL.md)** — a step-by-step walkthrough with
+Windows/Mac commands side-by-side, placeholder paths, expected outputs,
+and common-error troubleshooting. This README is the terse developer
+reference; PROTOCOL.md is the friendly one.
+
 ## Getting Started
 
 ### 1. Install prerequisites
@@ -362,7 +371,8 @@ python plot_overlay.py \
 |-----------------|---------|
 | `--input`       | Files with conversion factors, as `file.txt:factor` pairs |
 | `--labels`      | Custom legend labels (default: parent folder name) |
-| `--bin-width`   | Radius bin width in nm (default: `0.5`) |
+| `--bin-width`   | Diameter bin width in nm (default: `0.5`) |
+| `--normalize-to` | How to normalize curves: `rightmost` (default), `leftmost`, `minimum`, or `none`. Rightmost matches Bhatia 2009 / Zeno 2018 convention |
 | `--diameter-cutoff` | Exclude puncta with diameter above this value in nm. Useful for filtering sparse large-diameter tail (optional) |
 | `--y-pad`       | Y-axis padding factor around the plotted bin means range. Default 0.3 (30%). Lower values (e.g., 0.1) zoom in tighter on the trend (optional) |
 | `--output-name` | Output filename (default: `normalized_curvature_overlay.png`) |
