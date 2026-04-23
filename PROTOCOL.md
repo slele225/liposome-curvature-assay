@@ -41,22 +41,27 @@ different curvature.
 
 You only need to do this **once per computer**.
 
-### 1. Install Python
+### 1. Install uv
 
-1. Go to <https://www.python.org/downloads/> and download Python 3.9 or
-   newer.
-2. **Windows:** During install, check the box **"Add python.exe to PATH"**.
-   This step is easy to miss and causes most "Python is not recognized"
-   errors.
-3. **Mac:** Just run the installer.
+uv is a fast Python package and environment manager. It will also
+install Python for you.
 
-Verify by opening a terminal and running:
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
 
-| Windows (PowerShell) | Mac (Terminal) |
-|----------------------|----------------|
-| `python --version`   | `python3 --version` |
+**Mac / Linux (bash):**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
-You should see something like `Python 3.11.4`.
+After install, close and reopen your terminal so the `uv` command is
+found. Verify by running:
+
+```
+uv --version
+```
 
 ### 2. Open a terminal
 
@@ -66,8 +71,8 @@ You should see something like `Python 3.11.4`.
 ### 3. Navigate to the repo folder
 
 Use `cd` ("change directory") to move into the folder where the code
-lives. Replace `<path/to/liposome-curvature-assay>` with the actual
-folder path.
+lives. Replace the path below with the actual folder path on your
+machine.
 
 | Windows (PowerShell) | Mac (Terminal) |
 |----------------------|----------------|
@@ -76,18 +81,39 @@ folder path.
 **Tip:** If your path has spaces, wrap it in quotes:
 `cd "C:\Users\your name\folder with spaces"`.
 
-### 4. Install required packages
+### 4. Create a virtual environment and install packages
 
 From inside the repo folder, run:
 
-| Windows (PowerShell) | Mac (Terminal) |
-|----------------------|----------------|
-| `pip install -r requirements.txt` | `pip3 install -r requirements.txt` |
+```
+uv venv
+uv pip install -r requirements.txt
+```
 
-This installs numpy, pandas, matplotlib, scipy, tifffile, h5py, and
-openpyxl. Takes about a minute on a fresh install.
+`uv venv` creates a `.venv/` folder in the repo with an isolated
+Python install. `uv pip install` installs numpy, pandas, matplotlib,
+scipy, tifffile, h5py, and openpyxl into that environment. Takes a
+few seconds.
 
-### 5. Create data folders
+### 5. Activate the environment
+
+Every time you open a new terminal to run the pipeline, you must
+activate the environment first:
+
+**Windows (PowerShell):**
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+**Mac / Linux (bash):**
+```bash
+source .venv/bin/activate
+```
+
+When activated, your prompt will show `(.venv)` at the start. All
+`python` commands below assume the environment is active.
+
+### 6. Create data folders
 
 | Windows (PowerShell) | Mac (Terminal) |
 |----------------------|----------------|
@@ -97,7 +123,7 @@ Copy your TIFF images into `data/<your_experiment_name>/` (for example,
 `data/20240315_DOPC_EGFP/`) and your DLS spreadsheet into
 `data/dls/`.
 
-### 6. Confirm setup works
+### 7. Confirm setup works
 
 Run:
 
@@ -142,7 +168,7 @@ python prepare_input.py `
 
 **Mac / Linux (bash):**
 ```bash
-python3 prepare_input.py \
+python prepare_input.py \
     --input data/20240315_DOPC_EGFP \
     --output data/20240315_DOPC_EGFP_matlab \
     --frames 2,0 \
@@ -162,7 +188,7 @@ python prepare_input.py `
 
 **Mac / Linux (bash):**
 ```bash
-python3 prepare_input.py \
+python prepare_input.py \
     --input "data/march 15 DOPC EGFP" \
     --output "data/march 15 DOPC EGFP_matlab" \
     --frames 2,0 \
@@ -233,7 +259,7 @@ python analyze_matlab.py `
 
 **Mac / Linux (bash):**
 ```bash
-python3 analyze_matlab.py \
+python analyze_matlab.py \
     --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V \
     --channels ch1,ch2 \
     --lipid-channel ch1 \
@@ -281,7 +307,7 @@ python dls_calibration.py `
 
 **Mac / Linux (bash):**
 ```bash
-python3 dls_calibration.py \
+python dls_calibration.py \
     --dls-input data/dls/20240315_DOPC_LUV.xlsx \
     --fluor-input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt \
     --save-dir figures/
@@ -331,7 +357,7 @@ python plot_curvature.py `
 
 **Mac / Linux (bash):**
 ```bash
-python3 plot_curvature.py \
+python plot_curvature.py \
     --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt \
     --conversion-factor 4.149 \
     --save-dir figures/
@@ -385,7 +411,7 @@ python plot_overlay.py `
 
 **Mac / Linux (bash):**
 ```bash
-python3 plot_overlay.py \
+python plot_overlay.py \
     --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.149 \
             data/20240315_DOPC_K58A_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.203 \
     --labels "WT EGFP" "Mutant K58A" \
@@ -423,22 +449,30 @@ sorting; flat curves mean no sorting.
 ## Troubleshooting
 
 **"'python' is not recognized as an internal or external command"**
-→ On Windows, Python was not added to PATH during install. Reinstall
-Python and check the **"Add python.exe to PATH"** box. Or use the full
-path to `python.exe`.
+→ You forgot to activate the virtual environment. Run the activation
+command from Setup step 5, then retry. Your prompt should show
+`(.venv)` when active.
+
+**"'uv' is not recognized"**
+→ Close and reopen your terminal after installing uv so your shell
+picks up the new command. If it's still not found, reinstall using the
+commands in Setup step 1.
 
 **"No module named pandas" (or numpy, scipy, etc.)**
-→ You skipped Setup step 4. Run
-`pip install -r requirements.txt` from inside the repo folder.
+→ You forgot to activate the virtual environment. Run the activation
+command from Setup step 5, then retry. Your prompt should show
+`(.venv)` when active.
+
+**Activation script can't be run on Windows ("running scripts is
+disabled on this system")**
+→ PowerShell's default execution policy blocks script activation. Run:
+`Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
+then try activating again.
 
 **"FileNotFoundError: [...] filtered_puncta_A_values.txt"**
 → Either the path is wrong, or Step 3 did not write the file. Paste
 your path into File Explorer / Finder to confirm it exists. If the
 path contains spaces, wrap it in double quotes.
-
-**"'python3' is not recognized" on Windows**
-→ On Windows, use `python` (not `python3`). The examples above use
-`python3` only for Mac.
 
 **`dls_calibration.py` runs but prints a tiny (< 10 nm) or huge
 (> 1000 nm) implied mean diameter**
