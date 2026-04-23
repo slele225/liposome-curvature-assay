@@ -131,15 +131,43 @@ MATLAB's CMEanalysis expects.
 
 **Command:**
 
-| Windows (PowerShell) | Mac (Terminal) |
-|----------------------|----------------|
-| `python prepare_input.py --input data\20240315_DOPC_EGFP --output data\20240315_DOPC_EGFP_matlab --frames 2,0 --crop 1` | `python3 prepare_input.py --input data/20240315_DOPC_EGFP --output data/20240315_DOPC_EGFP_matlab --frames 2,0 --crop 1` |
+**Windows (PowerShell):**
+```powershell
+python prepare_input.py `
+    --input data\20240315_DOPC_EGFP `
+    --output data\20240315_DOPC_EGFP_matlab `
+    --frames 2,0 `
+    --crop 1
+```
+
+**Mac / Linux (bash):**
+```bash
+python3 prepare_input.py \
+    --input data/20240315_DOPC_EGFP \
+    --output data/20240315_DOPC_EGFP_matlab \
+    --frames 2,0 \
+    --crop 1
+```
 
 **If your folder name has spaces,** wrap each path in double quotes:
 
-| Windows | Mac |
-|---------|-----|
-| `python prepare_input.py --input "data\march 15 DOPC EGFP" --output "data\march 15 DOPC EGFP_matlab" --frames 2,0 --crop 1` | `python3 prepare_input.py --input "data/march 15 DOPC EGFP" --output "data/march 15 DOPC EGFP_matlab" --frames 2,0 --crop 1` |
+**Windows (PowerShell):**
+```powershell
+python prepare_input.py `
+    --input "data\march 15 DOPC EGFP" `
+    --output "data\march 15 DOPC EGFP_matlab" `
+    --frames 2,0 `
+    --crop 1
+```
+
+**Mac / Linux (bash):**
+```bash
+python3 prepare_input.py \
+    --input "data/march 15 DOPC EGFP" \
+    --output "data/march 15 DOPC EGFP_matlab" \
+    --frames 2,0 \
+    --crop 1
+```
 
 **Arguments explained:**
 - `--input` — the folder with your raw TIFFs (here,
@@ -193,9 +221,25 @@ separated file with the kept amplitudes.
 
 **Command (two-channel, lipid + protein):**
 
-| Windows | Mac |
-|---------|-----|
-| `python analyze_matlab.py --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V --channels ch1,ch2 --lipid-channel ch1 --k-std 4 --output-name filtered_puncta_A_values.txt` | `python3 analyze_matlab.py --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V --channels ch1,ch2 --lipid-channel ch1 --k-std 4 --output-name filtered_puncta_A_values.txt` |
+**Windows (PowerShell):**
+```powershell
+python analyze_matlab.py `
+    --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V `
+    --channels ch1,ch2 `
+    --lipid-channel ch1 `
+    --k-std 4 `
+    --output-name filtered_puncta_A_values.txt
+```
+
+**Mac / Linux (bash):**
+```bash
+python3 analyze_matlab.py \
+    --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V \
+    --channels ch1,ch2 \
+    --lipid-channel ch1 \
+    --k-std 4 \
+    --output-name filtered_puncta_A_values.txt
+```
 
 **Lipid-only command** (no protein channel): replace
 `--channels ch1,ch2` with `--channels ch1` and keep
@@ -227,9 +271,21 @@ standard Zetasizer sections — headers `X Intensity`, `X Volume`, and
 
 **Command:**
 
-| Windows | Mac |
-|---------|-----|
-| `python dls_calibration.py --dls-input data\dls\20240315_DOPC_LUV.xlsx --fluor-input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt --save-dir figures\` | `python3 dls_calibration.py --dls-input data/dls/20240315_DOPC_LUV.xlsx --fluor-input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt --save-dir figures/` |
+**Windows (PowerShell):**
+```powershell
+python dls_calibration.py `
+    --dls-input data\dls\20240315_DOPC_LUV.xlsx `
+    --fluor-input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt `
+    --save-dir figures\
+```
+
+**Mac / Linux (bash):**
+```bash
+python3 dls_calibration.py \
+    --dls-input data/dls/20240315_DOPC_LUV.xlsx \
+    --fluor-input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt \
+    --save-dir figures/
+```
 
 **Output to look for:**
 - Printed to the terminal: a line like
@@ -265,9 +321,21 @@ the final protein-density-vs-diameter plot.
 
 **Command:**
 
-| Windows | Mac |
-|---------|-----|
-| `python plot_curvature.py --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt --conversion-factor 4.149 --save-dir figures\` | `python3 plot_curvature.py --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt --conversion-factor 4.149 --save-dir figures/` |
+**Windows (PowerShell):**
+```powershell
+python plot_curvature.py `
+    --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt `
+    --conversion-factor 4.149 `
+    --save-dir figures\
+```
+
+**Mac / Linux (bash):**
+```bash
+python3 plot_curvature.py \
+    --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt \
+    --conversion-factor 4.149 \
+    --save-dir figures/
+```
 
 The `4.149` is the exact number printed by `dls_calibration.py` in
 Step 4 — replace it with whatever your own run printed.
@@ -306,9 +374,23 @@ several experiments on one figure (e.g., WT vs. mutant).
 
 **Command:**
 
-| Windows | Mac |
-|---------|-----|
-| `python plot_overlay.py --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt:4.149 data\20240315_DOPC_K58A_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt:4.203 --labels "WT EGFP" "Mutant K58A" --save-dir figures\` | `python3 plot_overlay.py --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.149 data/20240315_DOPC_K58A_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.203 --labels "WT EGFP" "Mutant K58A" --save-dir figures/` |
+**Windows (PowerShell):**
+```powershell
+python plot_overlay.py `
+    --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt:4.149 `
+            data\20240315_DOPC_K58A_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt:4.203 `
+    --labels "WT EGFP" "Mutant K58A" `
+    --save-dir figures\
+```
+
+**Mac / Linux (bash):**
+```bash
+python3 plot_overlay.py \
+    --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.149 \
+            data/20240315_DOPC_K58A_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.203 \
+    --labels "WT EGFP" "Mutant K58A" \
+    --save-dir figures/
+```
 
 Each input is `path:conversion_factor` (note the colon, with no spaces
 around it) — **run Step 4 separately for each condition** to get its
