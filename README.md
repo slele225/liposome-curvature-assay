@@ -371,6 +371,8 @@ python plot_overlay.py \
 |-----------------|---------|
 | `--input`       | Files with conversion factors, as `file.txt:factor` pairs |
 | `--labels`      | Custom legend labels (default: parent folder name) |
+| `--lipid-col`   | Column name for lipid amplitude (default: `A_ch1`) |
+| `--protein-col` | Column name for protein amplitude (default: `A_ch2`) |
 | `--bin-width`   | Diameter bin width in nm (default: `0.5`) |
 | `--normalize-to` | How to normalize curves: `rightmost` (default), `leftmost`, `minimum`, or `none`. Rightmost matches Bhatia 2009 / Zeno 2018 convention |
 | `--diameter-cutoff` | Exclude puncta with diameter above this value in nm. Useful for filtering sparse large-diameter tail (optional) |

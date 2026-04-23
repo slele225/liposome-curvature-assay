@@ -93,8 +93,9 @@ openpyxl. Takes about a minute on a fresh install.
 |----------------------|----------------|
 | `mkdir data, figures` | `mkdir data figures` |
 
-Copy your TIFF images into `data/<experiment_name>/` and your DLS
-spreadsheet into `data/`.
+Copy your TIFF images into `data/<your_experiment_name>/` (for example,
+`data/20240315_DOPC_EGFP/`) and your DLS spreadsheet into
+`data/dls/`.
 
 ### 6. Confirm setup works
 
@@ -114,8 +115,13 @@ the Troubleshooting section below.
 Each step produces an output that feeds into the next step. Run them
 in order.
 
-Throughout this document, text in angle brackets like
-`<path/to/file>` is a **placeholder** — replace it with your actual path.
+> **The paths shown below are examples — replace them with the paths to
+> YOUR files.** All examples use a made-up experiment called
+> `20240315_DOPC_EGFP` (DOPC liposomes with EGFP protein, imaged on
+> 2024-03-15) and a DLS file `20240315_DOPC_LUV.xlsx`. Substitute your
+> own filenames throughout. **Keep the double quotes if your paths
+> contain spaces** — e.g. a Windows path with a space in it looks like
+> `"data\march 15 experiment\filtered_puncta_A_values.txt"`.
 
 ### Step 1: Prepare TIFF images
 
@@ -127,17 +133,25 @@ MATLAB's CMEanalysis expects.
 
 | Windows (PowerShell) | Mac (Terminal) |
 |----------------------|----------------|
-| `python prepare_input.py --input data\<experiment_name> --output data\<experiment_name>_matlab --frames 2,0 --crop 1` | `python3 prepare_input.py --input data/<experiment_name> --output data/<experiment_name>_matlab --frames 2,0 --crop 1` |
+| `python prepare_input.py --input data\20240315_DOPC_EGFP --output data\20240315_DOPC_EGFP_matlab --frames 2,0 --crop 1` | `python3 prepare_input.py --input data/20240315_DOPC_EGFP --output data/20240315_DOPC_EGFP_matlab --frames 2,0 --crop 1` |
+
+**If your folder name has spaces,** wrap each path in double quotes:
+
+| Windows | Mac |
+|---------|-----|
+| `python prepare_input.py --input "data\march 15 DOPC EGFP" --output "data\march 15 DOPC EGFP_matlab" --frames 2,0 --crop 1` | `python3 prepare_input.py --input "data/march 15 DOPC EGFP" --output "data/march 15 DOPC EGFP_matlab" --frames 2,0 --crop 1` |
 
 **Arguments explained:**
-- `--input` — the folder with your raw TIFFs.
+- `--input` — the folder with your raw TIFFs (here,
+  `data/20240315_DOPC_EGFP/` containing files like
+  `image001.tif`, `image002.tif`, …).
 - `--output` — a new folder (will be created).
 - `--frames 2,0` — frame 2 is lipid, frame 0 is protein. Adjust if your
   acquisition is different.
 - `--crop 1` — no cropping. Use `2` for center-quarter crop.
 
-**Output to look for:** A new folder `data/<experiment_name>_matlab/`
-containing subfolders like `488nm_530V_561nm_500V/cell1/ch1/` and
+**Output to look for:** A new folder `data/20240315_DOPC_EGFP_matlab/`
+containing subfolders like `488nm_580V_561nm_500V/cell1/ch1/` and
 `.../ch2/`, each with one TIFF per cell.
 
 **What to check:** Open one of the `ch1` TIFFs in Fiji/ImageJ — it
@@ -156,8 +170,9 @@ CMEanalysis toolbox from the Danuser lab:
 <https://github.com/DanuserLab/cmeAnalysis>
 
 1. Install CMEanalysis in MATLAB per their instructions.
-2. Point CMEanalysis at your `data/<experiment_name>_matlab/488nm_.../`
-   folder from Step 1.
+2. Point CMEanalysis at your
+   `data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/` folder from
+   Step 1.
 3. Set the **master channel** to `ch1` (lipid).
 4. Run the detection step.
 
@@ -180,15 +195,16 @@ separated file with the kept amplitudes.
 
 | Windows | Mac |
 |---------|-----|
-| `python analyze_matlab.py --input data\<experiment_name>_matlab\<voltage_folder> --channels ch1,ch2 --lipid-channel ch1 --k-std 2.0 --output-name filtered_puncta_A_values.txt` | `python3 analyze_matlab.py --input data/<experiment_name>_matlab/<voltage_folder> --channels ch1,ch2 --lipid-channel ch1 --k-std 2.0 --output-name filtered_puncta_A_values.txt` |
+| `python analyze_matlab.py --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V --channels ch1,ch2 --lipid-channel ch1 --k-std 4 --output-name filtered_puncta_A_values.txt` | `python3 analyze_matlab.py --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V --channels ch1,ch2 --lipid-channel ch1 --k-std 4 --output-name filtered_puncta_A_values.txt` |
 
 **Lipid-only command** (no protein channel): replace
 `--channels ch1,ch2` with `--channels ch1` and keep
 `--lipid-channel ch1`.
 
 **Arguments explained:**
-- `--k-std 2.0` — keep puncta with amplitude > mean(background) + 2·std.
-  Raise to `2.5` for stricter filtering, lower to `1.5` for looser.
+- `--k-std 4` — keep puncta with amplitude > mean(background) + 4·std.
+  Raise for stricter filtering, lower for looser (default in the script
+  is `2.0`).
 
 **Output to look for:** A file called `filtered_puncta_A_values.txt`
 inside the input folder. Columns: `A_ch1`, `A_ch2` (if two-channel).
@@ -213,11 +229,11 @@ standard Zetasizer sections — headers `X Intensity`, `X Volume`, and
 
 | Windows | Mac |
 |---------|-----|
-| `python dls_calibration.py --dls-input data\<dls_file>.xlsx --fluor-input data\<experiment_name>_matlab\<voltage_folder>\filtered_puncta_A_values.txt --save-dir figures\` | `python3 dls_calibration.py --dls-input data/<dls_file>.xlsx --fluor-input data/<experiment_name>_matlab/<voltage_folder>/filtered_puncta_A_values.txt --save-dir figures/` |
+| `python dls_calibration.py --dls-input data\dls\20240315_DOPC_LUV.xlsx --fluor-input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt --save-dir figures\` | `python3 dls_calibration.py --dls-input data/dls/20240315_DOPC_LUV.xlsx --fluor-input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt --save-dir figures/` |
 
 **Output to look for:**
 - Printed to the terminal: a line like
-  `python plot_curvature.py --conversion-factor 4.149283 ...`
+  `python plot_curvature.py --conversion-factor 4.149 ...`
   **Copy this number.** You need it for Step 5.
 - `figures/dls_overlay_calibration.png` — a two-panel plot showing the
   DLS distribution (blue) and your fluorescence distribution (red,
@@ -230,9 +246,15 @@ standard Zetasizer sections — headers `X Intensity`, `X Volume`, and
 - If they disagree badly, your detection threshold in Step 3 may be
   wrong — too many spurious detections bias the distribution.
 
-**Optional — add bootstrap variance estimate:** add
-`--bootstrap 200` to the command to get confidence intervals on the
-conversion factor.
+**Optional extras:**
+- `--bootstrap 200` — resamples the fluorescence data 200 times to
+  estimate confidence intervals on the conversion factor. Use this when
+  you want to report an uncertainty.
+- `--bootstrap-k 500` — use only 500 puncta per bootstrap iteration
+  instead of all of them. Useful for checking whether your result is
+  stable under smaller samples.
+- `--lipid-col A_ch1` — change the column name used for lipid amplitude
+  if your filtered file does not use the default `A_ch1`.
 
 ---
 
@@ -245,10 +267,10 @@ the final protein-density-vs-diameter plot.
 
 | Windows | Mac |
 |---------|-----|
-| `python plot_curvature.py --input data\<experiment_name>_matlab\<voltage_folder>\filtered_puncta_A_values.txt --conversion-factor <number_from_step_4> --save-dir figures\` | `python3 plot_curvature.py --input data/<experiment_name>_matlab/<voltage_folder>/filtered_puncta_A_values.txt --conversion-factor <number_from_step_4> --save-dir figures/` |
+| `python plot_curvature.py --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt --conversion-factor 4.149 --save-dir figures\` | `python3 plot_curvature.py --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt --conversion-factor 4.149 --save-dir figures/` |
 
-Replace `<number_from_step_4>` with the exact number printed by
-`dls_calibration.py` (e.g., `4.149283`).
+The `4.149` is the exact number printed by `dls_calibration.py` in
+Step 4 — replace it with whatever your own run printed.
 
 **Output to look for:** A file in `figures/` ending with
 `__protein_density_vs_diameter.png`. Light dots are individual puncta;
@@ -258,10 +280,22 @@ larger dots are bin-averaged means.
 - The x-axis range should roughly match the DLS size distribution
   (typically 50–200 nm). If you see a peak at 3 nm or 3000 nm, the
   conversion factor is wrong — re-run Step 4.
-- If you see a sparse noisy tail at large diameters, add
-  `--diameter-cutoff 200` (or similar) to the command.
-- If the trend is hard to see because of y-axis outliers, add
-  `--y-pad 0.1` to zoom in.
+
+**Optional extras:**
+- `--diameter-cutoff 120` — exclude puncta with diameter above 120 nm.
+  Use this when a sparse noisy tail at large diameters is stretching
+  the x-axis.
+- `--y-pad 0.1` — shrink the y-axis padding from 30% to 10%. Use this
+  when the trend is hard to see because a few y-axis outliers are
+  squashing the plot.
+- `--bin-width 5` — change the bin width for the averaged curve
+  (default is 0.5 nm). Larger bins = smoother curve, fewer points.
+- `--dls-mean-diameter 95.75` — alternative to `--conversion-factor`.
+  Use the mean diameter printed by Step 4 instead of the conversion
+  factor. Results are equivalent.
+- `--lipid-col A_ch1` / `--protein-col A_ch2` — change the column
+  names used for lipid/protein amplitudes if your filtered file does
+  not use the defaults.
 
 ---
 
@@ -274,16 +308,33 @@ several experiments on one figure (e.g., WT vs. mutant).
 
 | Windows | Mac |
 |---------|-----|
-| `python plot_overlay.py --input data\cond1\filtered.txt:<factor1> data\cond2\filtered.txt:<factor2> --labels "WT" "Mutant K58A" --save-dir figures\` | `python3 plot_overlay.py --input data/cond1/filtered.txt:<factor1> data/cond2/filtered.txt:<factor2> --labels "WT" "Mutant K58A" --save-dir figures/` |
+| `python plot_overlay.py --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt:4.149 data\20240315_DOPC_K58A_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt:4.203 --labels "WT EGFP" "Mutant K58A" --save-dir figures\` | `python3 plot_overlay.py --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.149 data/20240315_DOPC_K58A_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.203 --labels "WT EGFP" "Mutant K58A" --save-dir figures/` |
 
-Each input is `<path>:<conversion_factor>` — **run Step 4 separately
-for each condition** to get its own conversion factor.
+Each input is `path:conversion_factor` (note the colon, with no spaces
+around it) — **run Step 4 separately for each condition** to get its
+own conversion factor. Here `4.149` is for WT and `4.203` is for the
+K58A mutant — use your own numbers.
 
 **Output to look for:** `figures/normalized_curvature_overlay.png`.
 
 **What to check:** All curves should end at `y = 1` on the right side
 (the "flat" reference). Rising curves on the left mean curvature
 sorting; flat curves mean no sorting.
+
+**Optional extras:**
+- `--normalize-to leftmost` — normalize to the smallest-diameter bin
+  instead of the largest. Useful if your protein is a
+  negative-curvature sensor (binds flat or convex membranes more than
+  curved ones). Options: `rightmost` (default), `leftmost`, `minimum`,
+  or `none` (raw density values).
+- `--diameter-cutoff 120` — exclude puncta with diameter above 120 nm.
+  Same purpose as in Step 5.
+- `--y-pad 0.1` — shrink y-axis padding from 30% to 10%.
+- `--bin-width 5` — change the bin width (default 0.5 nm).
+- `--output-name WT_vs_K58A.png` — change the saved figure's filename
+  (default is `normalized_curvature_overlay.png`).
+- `--lipid-col A_ch1` / `--protein-col A_ch2` — change column names if
+  your filtered files do not use the defaults.
 
 ---
 
@@ -335,10 +386,10 @@ At the end of a run, `figures/` should contain at minimum:
 | File | From which step |
 |------|-----------------|
 | `dls_overlay_calibration.png` | Step 4 |
-| `<voltage_folder>__protein_density_vs_diameter.png` | Step 5 |
+| `488nm_580V_561nm_500V__protein_density_vs_diameter.png` | Step 5 |
 | `normalized_curvature_overlay.png` (if you ran Step 6) | Step 6 |
 
-And `data/<experiment_name>_matlab/<voltage_folder>/` contains:
+And `data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/` contains:
 
 | File | From which step |
 |------|-----------------|
