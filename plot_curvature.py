@@ -116,7 +116,7 @@ def bin_by_diameter(x: np.ndarray, y: np.ndarray, bin_width: float):
 
 # ── Plotting ────────────────────────────────────────────────────────────
 
-def make_plot(x, y, bx, by, title, save_path, bin_width):
+def make_plot(x, y, bx, by, title, save_path, bin_width, y_pad=0.3):
     fig, ax = plt.subplots(figsize=(10, 7))
 
     ax.scatter(x, y, s=6, alpha=0.08, label="Individual puncta")
@@ -130,10 +130,10 @@ def make_plot(x, y, bx, by, title, save_path, bin_width):
 
     # Fit y-axis to bin means so the trend isn't squashed by scatter outliers
     if len(by) > 0:
-        y_pad = (by.max() - by.min()) * 0.3
-        if y_pad == 0:
-            y_pad = by.max() * 0.3
-        ax.set_ylim(by.min() - y_pad, by.max() + y_pad)
+        pad = (by.max() - by.min()) * y_pad
+        if pad == 0:
+            pad = by.max() * y_pad
+        ax.set_ylim(by.min() - pad, by.max() + pad)
 
     fig.tight_layout()
     fig.savefig(save_path, dpi=300)
@@ -183,6 +183,13 @@ def main():
         type=float,
         default=0.5,
         help="Diameter bin width in nm for averaged curve (default: 0.5)",
+    )
+    parser.add_argument(
+        "--y-pad",
+        type=float,
+        default=0.3,
+        help="Y-axis padding factor above/below the bin means range "
+             "(default: 0.3 = 30%%).",
     )
     parser.add_argument(
         "--diameter-cutoff",
@@ -246,7 +253,8 @@ def main():
             save_path = os.path.join(save_dir, save_name)
 
             title = f"Protein surface density vs diameter\n{parent}"
-            make_plot(x, y, bx, by, title, save_path, args.bin_width)
+            make_plot(x, y, bx, by, title, save_path, args.bin_width,
+                      y_pad=args.y_pad)
 
         except Exception as e:
             print(f"[ERROR] {path}: {e}")

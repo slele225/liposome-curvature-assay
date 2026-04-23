@@ -254,6 +254,7 @@ python plot_curvature.py \
 | `--protein-col`       | Column for protein amplitude (default: `A_ch2`) |
 | `--bin-width`         | Diameter bin width in nm for averaged curve (default: `0.5`) |
 | `--diameter-cutoff`   | Exclude puncta with diameter above this value in nm. Useful for filtering sparse large-diameter tail (optional) |
+| `--y-pad`             | Y-axis padding factor around bin means. Default 0.3 (30%). Lower values (e.g., 0.1) zoom in tighter on the trend (optional) |
 | `--save-dir`          | Output directory for figures |
 
 Provide exactly one of `--conversion-factor` or `--dls-mean-diameter`.
