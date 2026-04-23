@@ -364,6 +364,7 @@ python plot_overlay.py \
 | `--labels`      | Custom legend labels (default: parent folder name) |
 | `--bin-width`   | Radius bin width in nm (default: `0.5`) |
 | `--diameter-cutoff` | Exclude puncta with diameter above this value in nm. Useful for filtering sparse large-diameter tail (optional) |
+| `--y-pad`       | Y-axis padding factor around the plotted bin means range. Default 0.3 (30%). Lower values (e.g., 0.1) zoom in tighter on the trend (optional) |
 | `--output-name` | Output filename (default: `normalized_curvature_overlay.png`) |
 | `--save-dir`    | Output directory for figure |
 

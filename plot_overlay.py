@@ -187,6 +187,13 @@ def main():
         help="Custom labels for each curve (default: parent folder name)",
     )
     parser.add_argument(
+        "--y-pad",
+        type=float,
+        default=0.3,
+        help="Y-axis padding factor around the plotted bin means range "
+             "(default: 0.3 = 30%%).",
+    )
+    parser.add_argument(
         "--diameter-cutoff",
         type=float,
         default=None,
@@ -277,12 +284,14 @@ def main():
     # ── Plot ────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(10, 7))
 
+    all_bin_values = []
     for bx, by_norm, label, conv_factor, n_pts in all_curves:
         ax.plot(
             bx, by_norm, "o-",
             markersize=5, linewidth=1.5,
             label=f"{label} (n={n_pts})",
         )
+        all_bin_values.append(by_norm)
 
     ax.axhline(1.0, color="gray", linestyle="--", linewidth=0.8, alpha=0.5)
     ax.set_xlabel("Liposome diameter (nm)")
@@ -290,6 +299,13 @@ def main():
     ax.set_title("Curvature Sorting \u2014 Normalized Overlay")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.2)
+
+    if all_bin_values:
+        combined = np.concatenate(all_bin_values)
+        pad = (combined.max() - combined.min()) * args.y_pad
+        if pad == 0:
+            pad = combined.max() * args.y_pad
+        ax.set_ylim(combined.min() - pad, combined.max() + pad)
 
     fig.tight_layout()
 
