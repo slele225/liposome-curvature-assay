@@ -89,17 +89,25 @@ def bin_by_diameter(x, y, bin_width):
     return np.array(centres), np.array(means)
 
 
-def normalize_to_rightmost(centres, means):
-    """Divide all bin means by the rightmost bin value so it equals 1."""
-    rightmost_idx = np.argmax(centres)
-    rightmost_val = means[rightmost_idx]
+def normalize(centres, means, mode):
+    """Normalize bin means according to mode."""
+    if mode == "none":
+        return means
+    if mode == "rightmost":
+        ref_idx = np.argmax(centres)
+    elif mode == "leftmost":
+        ref_idx = np.argmin(centres)
+    elif mode == "minimum":
+        ref_idx = np.argmin(means)
+    else:
+        raise ValueError(f"Unknown normalize mode: {mode}")
 
-    if rightmost_val <= 0 or not np.isfinite(rightmost_val):
+    ref_val = means[ref_idx]
+    if ref_val <= 0 or not np.isfinite(ref_val):
         raise ValueError(
-            f"Rightmost bin value is {rightmost_val} -- cannot normalize."
+            f"Reference bin value is {ref_val} -- cannot normalize."
         )
-
-    return means / rightmost_val
+    return means / ref_val
 
 
 # ── Input parsing ───────────────────────────────────────────────────────
@@ -187,6 +195,17 @@ def main():
         help="Custom labels for each curve (default: parent folder name)",
     )
     parser.add_argument(
+        "--normalize-to",
+        choices=["rightmost", "leftmost", "minimum", "none"],
+        default="rightmost",
+        help="How to normalize each curve. 'rightmost' (default, Bhatia/Zeno "
+             "convention) = fold enrichment vs largest diameter (flattest). "
+             "'leftmost' = fold enrichment vs smallest diameter (most curved, "
+             "useful for negative-curvature sensors). 'minimum' = divide by "
+             "smallest bin value regardless of position. 'none' = plot raw "
+             "density values without normalization.",
+    )
+    parser.add_argument(
         "--y-pad",
         type=float,
         default=0.3,
@@ -260,7 +279,7 @@ def main():
                       f"{n_before} -> {len(x)} points")
 
             bx, by = bin_by_diameter(x, y, args.bin_width)
-            by_norm = normalize_to_rightmost(bx, by)
+            by_norm = normalize(bx, by, args.normalize_to)
 
             if args.labels:
                 label = args.labels[i]
@@ -295,8 +314,14 @@ def main():
 
     ax.axhline(1.0, color="gray", linestyle="--", linewidth=0.8, alpha=0.5)
     ax.set_xlabel("Liposome diameter (nm)")
-    ax.set_ylabel("Normalized protein density (fold enrichment)")
-    ax.set_title("Curvature Sorting \u2014 Normalized Overlay")
+    ylabel_map = {
+        "rightmost": "Normalized protein density (fold enrichment vs flat)",
+        "leftmost":  "Normalized protein density (fold enrichment vs most curved)",
+        "minimum":   "Normalized protein density (fold vs minimum bin)",
+        "none":      "Protein surface density [A / nm^2]",
+    }
+    ax.set_ylabel(ylabel_map[args.normalize_to])
+    ax.set_title(f"Curvature Sorting Overlay  (normalized to {args.normalize_to})")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.2)
 

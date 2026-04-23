@@ -5,9 +5,8 @@ fluorescence microscopy images. Pairs with the
 [CMEanalysis MATLAB detection code](https://github.com/DanuserLab/cmeAnalysis)
 for sub-diffraction-limit spot detection.
 
-> **New to this repo?** See the full step-by-step protocol document
-> (`Single_Liposome_Curvature_Assay_Protocol.docx`) for beginner-friendly
-> instructions with troubleshooting.
+> **New to this repo?** See [PROTOCOL.md](PROTOCOL.md) for a
+> beginner-friendly step-by-step walkthrough with troubleshooting.
 
 ## For Non-Coders
 
@@ -134,7 +133,7 @@ Raw TIFFs                ┌─────────────────�
                                   ▼
                          ┌─────────────────────┐
                          │ 2. MATLAB detection  │  External: CMEanalysis
-                         │    (not in this repo)│  (see protocol doc)
+                         │    (not in this repo)│  (see PROTOCOL.md)
                          └────────┬────────────┘
                                   │
                                   ▼
@@ -202,7 +201,7 @@ python prepare_input.py \
 
 ### Step 2: MATLAB detection (external)
 
-See the protocol document for detailed CMEanalysis instructions. The detection
+See [PROTOCOL.md](PROTOCOL.md) for detailed CMEanalysis instructions. The detection
 produces `detection_v2.mat` files inside the master channel's `Detection/`
 subdirectory. Only the lipid/master channel (ch1) gets this folder.
 
