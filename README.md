@@ -182,22 +182,32 @@ Every script uses `argparse` — run `python <script>.py --help` for full option
 
 ### Step 1: Prepare images
 
-Split multi-frame TIFFs into per-channel folders organized by detector voltage.
+Split multi-frame TIFFs into per-channel folders organized by laser
+configuration. Olympus FV3000 metadata is parsed for active lasers
+(transmissivity > 0), each channel's excitation laser, and per-channel
+PMT voltage. Folder names encode all three: e.g.
+`488nm_5.0pct_580V_561nm_3.2pct_500V/`. Lambda-phase channels are
+ignored. Channel folders `ch1`, `ch2`, … follow wavelength-ascending
+order, so `ch1` is always the lowest-wavelength active laser.
 
 ```bash
 python prepare_input.py \
     --input  data/march_3_experiment \
     --output data/march_3_experiment_matlab \
-    --frames 2,0 \
     --crop 1
 ```
+
+Run with `--dry-run` first to preview the parsed channel configuration
+and the folder structure that would be created, without writing any
+files.
 
 | Argument    | Meaning |
 |-------------|---------|
 | `--input`   | Folder containing raw .tif files |
 | `--output`  | Where to save the split channels (inside `data/`) |
-| `--frames`  | Frame index order. `2,0` = frame 2 → ch1 (lipid), frame 0 → ch2 (protein) |
+| `--frames`  | Comma-separated frame indices, one per active channel in wavelength-ascending order (e.g. `0,1,2`). Optional — defaults to `0,1,...,N-1` per TIFF based on its active channel count |
 | `--crop`    | Center crop divisor. `1` = no crop, `2` = center quarter |
+| `--dry-run` | Parse metadata and print what would be created, without writing files |
 
 ### Step 2: MATLAB detection (external)
 
@@ -211,7 +221,7 @@ Filter puncta by intensity threshold and export amplitudes.
 
 ```bash
 python analyze_matlab.py \
-    --input  data/march_3_experiment_matlab/488nm_530V_561nm_500V \
+    --input  data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V \
     --channels ch1,ch2 \
     --lipid-channel ch1 \
     --k-std 2.0 \
@@ -229,7 +239,7 @@ python analyze_matlab.py \
 For **lipid-only** experiments (no protein channel):
 ```bash
 python analyze_matlab.py \
-    --input  data/.../488nm_530V_561nm_500V \
+    --input  data/.../488nm_5.0pct_580V_561nm_3.2pct_500V \
     --channels ch1 \
     --lipid-channel ch1
 ```

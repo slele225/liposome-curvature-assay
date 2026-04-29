@@ -239,7 +239,7 @@ liposome-curvature-assay/
 │   │   ├── image001.tif
 │   │   └── image002.tif
 │   └── 20240315_DOPC_EGFP_matlab/            ← created by Step 1
-│       └── 488nm_580V_561nm_500V/
+│       └── 488nm_5.0pct_580V_561nm_3.2pct_500V/
 │           ├── cell1/
 │           │   ├── ch1/   ← lipid (master)
 │           │   └── ch2/   ← protein
@@ -266,16 +266,22 @@ Both folders are gitignored — your data stays on your computer.
 ## Step 1: Prepare Images
 
 **What this does:** Reads your raw multi-frame TIFFs from the
-microscope, splits them into per-channel folders organized by detector
-voltage (from the Olympus FV3000 metadata), and optionally
-center-crops. The output structure is what MATLAB's CMEanalysis
-expects.
+microscope, parses the Olympus FV3000 metadata to detect which lasers
+were active (transmissivity > 0), maps each channel to its excitation
+laser, reads the per-channel PMT voltage, and splits the TIFFs into
+per-channel folders grouped by laser configuration. Lambda-phase
+channels are ignored. Channel folders `ch1`, `ch2`, … are ordered by
+ascending wavelength, so `ch1` is always the lowest-wavelength
+active laser (e.g. 488 if 488/561 are active; 405 if 405/488/640 are
+active). Folder names look like
+`488nm_5.0pct_580V_561nm_3.2pct_500V/`.
+
+**Tip:** Run with `--dry-run` first to confirm the script parsed your
+channels correctly before committing to writing files.
 
 **Before you start:**
 - Put all the raw `.tif` files from one experiment into a subfolder of
   `data/` — for example, `data/20240315_DOPC_EGFP/`.
-- Know which TIFF frame index is lipid and which is protein. Open one
-  TIFF in Fiji/ImageJ if unsure.
 
 **Commands** (with the venv activated and you in the repo folder):
 
@@ -284,7 +290,6 @@ expects.
 python prepare_input.py \
     --input  data/20240315_DOPC_EGFP \
     --output data/20240315_DOPC_EGFP_matlab \
-    --frames 2,0 \
     --crop 1
 ```
 
@@ -293,8 +298,28 @@ python prepare_input.py \
 python prepare_input.py `
     --input  data\20240315_DOPC_EGFP `
     --output data\20240315_DOPC_EGFP_matlab `
-    --frames 2,0 `
     --crop 1
+```
+
+**Dry-run version** (parses metadata, prints the planned folder
+structure, writes nothing):
+
+**Mac / Linux (bash):**
+```bash
+python prepare_input.py \
+    --input  data/20240315_DOPC_EGFP \
+    --output data/20240315_DOPC_EGFP_matlab \
+    --crop 1 \
+    --dry-run
+```
+
+**Windows (PowerShell):**
+```powershell
+python prepare_input.py `
+    --input  data\20240315_DOPC_EGFP `
+    --output data\20240315_DOPC_EGFP_matlab `
+    --crop 1 `
+    --dry-run
 ```
 
 **If your folder name has spaces,** wrap the paths in double quotes:
@@ -304,7 +329,6 @@ python prepare_input.py `
 python prepare_input.py \
     --input  "data/march 15 DOPC EGFP" \
     --output "data/march 15 DOPC EGFP_matlab" \
-    --frames 2,0 \
     --crop 1
 ```
 
@@ -313,7 +337,6 @@ python prepare_input.py \
 python prepare_input.py `
     --input  "data\march 15 DOPC EGFP" `
     --output "data\march 15 DOPC EGFP_matlab" `
-    --frames 2,0 `
     --crop 1
 ```
 
@@ -323,12 +346,13 @@ python prepare_input.py `
 |------------|---------------|
 | `--input`  | Folder containing your raw `.tif` files. |
 | `--output` | Folder to create with the split channels. Will be created. |
-| `--frames` | Comma-separated frame order. `2,0` means frame 2 → ch1 (lipid), frame 0 → ch2 (protein). Frame indices start at 0. |
+| `--frames` | Comma-separated frame indices, one per active channel in wavelength-ascending order (e.g. `0,1` for two channels, `0,1,2` for three). Optional — if omitted, defaults to `0,1,...,N-1` for each TIFF based on its active channel count. |
 | `--crop`   | Center crop divisor. `1` = no crop. `2` = center quarter. Use if your image has dark borders. |
+| `--dry-run`| Parse metadata and print what would be created, without writing any files. |
 
 **Expected output:** A new folder
 `data/20240315_DOPC_EGFP_matlab/` containing one subfolder per voltage
-group (e.g. `488nm_580V_561nm_500V/`), each with `cell1/`, `cell2/`,
+group (e.g. `488nm_5.0pct_580V_561nm_3.2pct_500V/`), each with `cell1/`, `cell2/`,
 … and inside each cell `ch1/` (lipid) and `ch2/` (protein) folders
 with one TIFF per cell. The script prints a summary at the end.
 
@@ -361,7 +385,7 @@ runs inside MATLAB using the Danuser lab's CMEanalysis toolbox
    ```
    A folder picker opens. Select your voltage-group folder from Step 1
    — for example,
-   `data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/`.
+   `data/20240315_DOPC_EGFP_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/`.
 
 3. **Select channels.** When prompted for the **first (master)
    channel**, pick the **lipid** folder (`ch1`). It will then ask for
@@ -396,7 +420,7 @@ subfolder containing `detection_v2.mat`. Only the master/lipid channel
 gets this folder — `ch2/` keeps just the TIFF. Example:
 
 ```
-data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/
+data/20240315_DOPC_EGFP_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/
 └── cell1/
     ├── ch1/
     │   └── Detection/
@@ -426,7 +450,7 @@ each cell's `ch1/Detection/` folder.
 **Mac / Linux (bash):**
 ```bash
 python analyze_matlab.py \
-    --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V \
+    --input data/20240315_DOPC_EGFP_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V \
     --channels ch1,ch2 \
     --lipid-channel ch1 \
     --k-std 4 \
@@ -436,7 +460,7 @@ python analyze_matlab.py \
 **Windows (PowerShell):**
 ```powershell
 python analyze_matlab.py `
-    --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V `
+    --input data\20240315_DOPC_EGFP_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V `
     --channels ch1,ch2 `
     --lipid-channel ch1 `
     --k-std 4 `
@@ -458,7 +482,7 @@ python analyze_matlab.py `
 `--lipid-channel ch1`.
 
 **Expected output:** A tab-separated file at
-`data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt`
+`data/20240315_DOPC_EGFP_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/filtered_puncta_A_values.txt`
 with columns `source_image`, `A_ch1` (lipid amplitude), `A_ch2`
 (protein amplitude — if two-channel). Each row is one liposome. The
 script prints a per-cell kept/total summary.
@@ -492,7 +516,7 @@ distribution is the one used.
 ```bash
 python dls_calibration.py \
     --dls-input data/dls/20240315_DOPC_LUV.xlsx \
-    --fluor-input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt \
+    --fluor-input data/20240315_DOPC_EGFP_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/filtered_puncta_A_values.txt \
     --save-dir figures/
 ```
 
@@ -500,7 +524,7 @@ python dls_calibration.py \
 ```powershell
 python dls_calibration.py `
     --dls-input data\dls\20240315_DOPC_LUV.xlsx `
-    --fluor-input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt `
+    --fluor-input data\20240315_DOPC_EGFP_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V\filtered_puncta_A_values.txt `
     --save-dir figures\
 ```
 
@@ -562,7 +586,7 @@ or the implied mean diameter — both are printed by Step 4.
 **Mac / Linux (bash):**
 ```bash
 python plot_curvature.py \
-    --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt \
+    --input data/20240315_DOPC_EGFP_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/filtered_puncta_A_values.txt \
     --conversion-factor 4.149 \
     --save-dir figures/
 ```
@@ -570,7 +594,7 @@ python plot_curvature.py \
 **Windows (PowerShell):**
 ```powershell
 python plot_curvature.py `
-    --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt `
+    --input data\20240315_DOPC_EGFP_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V\filtered_puncta_A_values.txt `
     --conversion-factor 4.149 `
     --save-dir figures\
 ```
@@ -607,7 +631,7 @@ Provide exactly one of `--conversion-factor` or `--dls-mean-diameter`.
   non-default.
 
 **Expected output:** A PNG at
-`figures/488nm_580V_561nm_500V__protein_density_vs_diameter.png`.
+`figures/488nm_5.0pct_580V_561nm_3.2pct_500V__protein_density_vs_diameter.png`.
 Faint dots are individual liposomes; larger dots are the binned means.
 
 **Interpreting the plot:**
@@ -647,8 +671,8 @@ mutant):
 **Mac / Linux (bash):**
 ```bash
 python plot_overlay.py \
-    --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.149 \
-            data/20240315_DOPC_K58A_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt:4.203 \
+    --input data/20240315_DOPC_EGFP_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/filtered_puncta_A_values.txt:4.149 \
+            data/20240315_DOPC_K58A_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/filtered_puncta_A_values.txt:4.203 \
     --labels "WT EGFP" "Mutant K58A" \
     --save-dir figures/
 ```
@@ -656,8 +680,8 @@ python plot_overlay.py \
 **Windows (PowerShell):**
 ```powershell
 python plot_overlay.py `
-    --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt:4.149 `
-            data\20240315_DOPC_K58A_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt:4.203 `
+    --input data\20240315_DOPC_EGFP_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V\filtered_puncta_A_values.txt:4.149 `
+            data\20240315_DOPC_K58A_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V\filtered_puncta_A_values.txt:4.203 `
     --labels "WT EGFP" "Mutant K58A" `
     --save-dir figures\
 ```
@@ -708,7 +732,7 @@ Useful before committing to Step 5, and for lipid-only experiments.
 **Mac / Linux (bash):**
 ```bash
 python plot_histograms.py \
-    --input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt \
+    --input data/20240315_DOPC_EGFP_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/filtered_puncta_A_values.txt \
     --lipid-col A_ch1 \
     --protein-col A_ch2 \
     --conversion-factor 4.149 \
@@ -718,7 +742,7 @@ python plot_histograms.py \
 **Windows (PowerShell):**
 ```powershell
 python plot_histograms.py `
-    --input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt `
+    --input data\20240315_DOPC_EGFP_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V\filtered_puncta_A_values.txt `
     --lipid-col A_ch1 `
     --protein-col A_ch2 `
     --conversion-factor 4.149 `
@@ -758,7 +782,7 @@ to disable zooming.
 ```bash
 python plot_dls_comparison.py \
     --dls-input data/dls/20240315_DOPC_LUV.xlsx \
-    --fluor-input data/20240315_DOPC_EGFP_matlab/488nm_580V_561nm_500V/filtered_puncta_A_values.txt \
+    --fluor-input data/20240315_DOPC_EGFP_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/filtered_puncta_A_values.txt \
     --channels 0 Lipid 1 EGFP \
     --zoom-pct 95 --bins 200 --save-dir figures/
 ```
@@ -767,7 +791,7 @@ python plot_dls_comparison.py \
 ```powershell
 python plot_dls_comparison.py `
     --dls-input data\dls\20240315_DOPC_LUV.xlsx `
-    --fluor-input data\20240315_DOPC_EGFP_matlab\488nm_580V_561nm_500V\filtered_puncta_A_values.txt `
+    --fluor-input data\20240315_DOPC_EGFP_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V\filtered_puncta_A_values.txt `
     --channels 0 Lipid 1 EGFP `
     --zoom-pct 95 --bins 200 --save-dir figures\
 ```
