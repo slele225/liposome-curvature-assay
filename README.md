@@ -183,12 +183,114 @@ Every script uses `argparse` — run `python <script>.py --help` for full option
 ### Step 1: Prepare images
 
 Split multi-frame TIFFs into per-channel folders organized by laser
-configuration. Olympus FV3000 metadata is parsed for active lasers
-(transmissivity > 0), each channel's excitation laser, and per-channel
-PMT voltage. Folder names encode all three: e.g.
-`488nm_5.0pct_580V_561nm_3.2pct_500V/`. Lambda-phase channels are
-ignored. Channel folders `ch1`, `ch2`, … follow wavelength-ascending
-order, so `ch1` is always the lowest-wavelength active laser.
+configuration. Folder names encode wavelength, transmissivity and PMT
+voltage for each channel: e.g. `488nm_17.7pct_652V_561nm_15.3pct_876V/`.
+Channel folders `ch1`, `ch2`, … follow wavelength-ascending order, so
+`ch1` is always the lowest-wavelength channel.
+
+#### How channels are resolved
+
+The channel count comes from the **image data**, never from how many
+lasers have nonzero transmissivity. `SizeC` is read from the Olympus
+FV3000 metadata and cross-checked against the TIFF's actual page count;
+a disagreement is a hard error naming both numbers.
+
+Each channel is then resolved by **ID linkage**, not by position:
+
+```
+Channel CH<n> ID                 = <uuid>        ← the channel's UUID
+Channel CH<n> linked laser index = <k>           ← 0-based into `laser name #<k+1>`
+Detector linked channel ID #<m>  = <uuid>        ← find the m matching the channel
+Detector voltage #<m>, Detector ID #<m>          ← that channel's PMT and detector
+```
+
+This matters because the detector block is **not** in the same order as
+the channel block, and several `channel <field> #<i>` sub-blocks are
+ragged (they describe different slices of the instrument configuration
+and are not co-indexed with each other). Pairing any of these by index
+silently mislabels channels. Detectors whose linked channel ID matches no
+acquired channel are configured-but-unused and are ignored entirely.
+
+Channels that are not fluorescence are dropped, each with a recorded
+reason:
+
+| Rule | Meaning |
+|------|---------|
+| Detector ID contains `LETD` | Transmitted-light/DIC channel |
+| `channel deviceName` is `TD` | Transmitted-light channel (only applied when that sub-block has one entry per acquired channel, otherwise it cannot be trusted) |
+| Laser data ID contains `Lambda` | Lambda-phase (spectral scan), not a main imaging phase |
+
+Anything ambiguous or unparseable raises rather than guessing — a
+wrong-but-silent channel assignment produces plausible-looking output and
+quietly corrupts the analysis.
+
+Dye names come from two sources. `dyeData excitationWavelength` matched
+exactly to a channel's laser is unambiguous but incomplete (Texas Red
+records 595 nm, so it never matches the 561 nm channel exciting it). The
+`channel dyeName` block covers every channel but is ragged and
+UUID-less, so it is used only when it has one entry per fluorescence
+channel *and* every entry that can be cross-checked against an exact
+excitation match agrees with it. One disagreement discards the whole
+block. `dye_source` in the manifest records which route was used.
+
+#### `channel_map.json`
+
+Every output group folder gets a `channel_map.json` recording, for each
+`ch<i>`: source page index, channel name, laser wavelength,
+transmissivity, detector ID, PMT voltage, dye name and `dye_source`.
+Excluded channels are listed with their reason. This makes the
+`ch1`/`ch2` assignment auditable later without reopening the raw files
+in Fiji.
+
+The manifest is generated from the **same ordered slot list** used to
+write the TIFFs, so `source_page` is always the page actually written to
+that slot and the rest of the fields always belong to the channel that
+page came from. It is never re-derived from wavelength.
+
+`channel_order` states the real order and `frames_argument` records the
+raw `--frames` value. Under an override that is not wavelength-ascending
+it says so explicitly, and a warning is printed to stderr:
+
+```json
+"channel_order": "custom order via --frames 1,0 (NOT wavelength-ascending)",
+"frames_argument": "1,0"
+```
+
+The **group folder name is built from the same slot list**, so it reads
+in `ch1`, `ch2`, … order and `ch1`'s laser comes first. It therefore
+tracks `--frames`:
+
+```
+(no --frames)   488nm_17.7pct_652V_561nm_15.3pct_876V/
+--frames 1,0    561nm_15.3pct_876V_488nm_17.7pct_652V/
+```
+
+Excluded channels are not slots, so they never appear in the name.
+`group_name_describes` in the manifest states this meaning. Note that a
+remapped run lands in a *different* folder from a default run of the
+same data, which is what keeps the two from silently merging.
+
+`--frames` may also name **fewer** pages than there are resolved
+channels, meaning "keep only these, in this order". The channels left
+unnamed are dropped from the slots and the folder name, and are recorded
+in `excluded_channels` with the reason `excluded by explicit --frames
+selection` — so the manifest still accounts for every channel in the
+file:
+
+```
+--frames 1      561nm_15.3pct_876V/     (CH1 recorded as deselected)
+```
+
+If `--frames` forces a rule-excluded channel (e.g. the DIC page) into a
+slot, that is allowed but recorded as `excluded_by_rule` on the slot and
+warned about on stderr.
+
+> **Note on channel roles.** The `ch1`/`ch2` ordering is by *wavelength*,
+> which is not necessarily lipid-then-protein. In the bundled
+> `data/olivia_data` acquisition `ch1` is 488/EGFP (protein) and `ch2` is
+> 561/Texas Red (lipid) — the opposite of the `--lipid-col A_ch1` /
+> `--protein-col A_ch2` defaults used downstream. Check
+> `channel_map.json` and set those flags accordingly.
 
 ```bash
 python prepare_input.py \
@@ -197,15 +299,23 @@ python prepare_input.py \
     --crop 1
 ```
 
-Run with `--dry-run` first to preview the parsed channel configuration
-and the folder structure that would be created, without writing any
-files.
+Run with `--dry-run` first. It prints the resolved per-channel table and
+every excluded channel with its reason, so the mapping is reviewable
+before anything is written:
+
+```
+  dataHis eGFP SLiC post exess removal.tif: 2 channels -> 488nm_17.7pct_652V_561nm_15.3pct_876V/cell1/
+      ch1  page 0  CH1  488nm  17.7%  652V  FV30-SD_D_1  EGFP
+      ch2  page 1  CH2  561nm  15.3%  876V  FV30-SD_D_2
+      excluded:
+        CH3 (page 2, 561nm, FV31-LETD_D_1): transmitted-light/DIC channel: detector FV31-LETD_D_1 is an LETD detector
+```
 
 | Argument    | Meaning |
 |-------------|---------|
 | `--input`   | Folder containing raw .tif files |
 | `--output`  | Where to save the split channels (inside `data/`) |
-| `--frames`  | Comma-separated frame indices, one per active channel in wavelength-ascending order (e.g. `0,1,2`). Optional — defaults to `0,1,...,N-1` per TIFF based on its active channel count |
+| `--frames`  | Comma-separated source page indices naming the pages to keep, in `ch1`, `ch2`, … order (e.g. `0,1`). May name **fewer** pages than there are resolved channels to keep a subset. Indices must be unique and in range. Optional — resolution already yields the correct pages, so this is rarely needed |
 | `--crop`    | Center crop divisor. `1` = no crop, `2` = center quarter |
 | `--dry-run` | Parse metadata and print what would be created, without writing files |
 
