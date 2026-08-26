@@ -513,6 +513,19 @@ def override_warnings(slots, frames_arg, group):
                 f"({c['channel']}) to ch{i}, but that channel was excluded as "
                 f"non-fluorescence: {c['reason']}"
             )
+    pages = [c["page"] for c in slots]
+    repeated = sorted({p for p in pages if pages.count(p) > 1})
+    for page in repeated:
+        dup_slots = ", ".join(
+            f"ch{i}" for i, c in enumerate(slots, start=1) if c["page"] == page
+        )
+        warnings.append(
+            f"WARNING: --frames {frames_arg} duplicates source page {page} "
+            f"into {dup_slots} in group '{group}'. The duplicated slots carry "
+            f"identical pixels; this is a compatibility/testing feature and "
+            f"must not be used when the second detector channel holds "
+            f"independent scientific data."
+        )
     return warnings
 
 
@@ -553,6 +566,12 @@ def assign_slots(channels, excluded, frame_order):
     meaning "keep only these, in this order". The channels left unnamed move
     into the returned ``excluded`` list, so they stay out of both the slots
     and the group folder name.
+
+    ``--frames`` may also repeat a page (e.g. ``1,1``): every slot naming
+    that page gets a literal copy of the same source pixels, and each such
+    slot records the same ``source_page`` in channel_map.json. This is a
+    compatibility/testing convenience, not a scientific workflow -- see the
+    warning emitted by override_warnings.
     """
     if frame_order is None:
         return list(channels), list(excluded)
@@ -564,13 +583,6 @@ def assign_slots(channels, excluded, frame_order):
         raise ValueError(
             f"--frames has {len(frame_order)} entries but this TIFF resolved "
             f"only {len(channels)} channels"
-        )
-
-    repeated = sorted({p for p in frame_order if frame_order.count(p) > 1})
-    if repeated:
-        raise ValueError(
-            f"--frames repeats page(s) {repeated}; each page may be used at "
-            f"most once"
         )
 
     by_page = {c["page"]: c for c in list(channels) + list(excluded)}
@@ -833,9 +845,12 @@ def main():
         help="Comma-separated source page indices naming the pages to keep, "
              "in ch1, ch2, ... order (e.g. '0,1'). May name fewer pages than "
              "there are resolved channels, in which case the unnamed ones are "
-             "dropped. Indices must be unique and in range. Optional — "
-             "channel resolution already yields the correct pages, so this is "
-             "rarely needed.",
+             "dropped. A page may be repeated (e.g. '1,1' duplicates source "
+             "page 1 into both ch1 and ch2 as a literal pixel copy) — a "
+             "compatibility/testing feature only; do not use it when the "
+             "second detector channel holds independent scientific data. "
+             "Indices must be in range. Optional — channel resolution "
+             "already yields the correct pages, so this is rarely needed.",
     )
     parser.add_argument(
         "--crop", type=int, default=1, help="Center crop divisor (1 = no crop)"
@@ -867,17 +882,6 @@ def main():
             frame_order = parse_int_list(args.frames)
             if not frame_order:
                 print("Error: --frames must contain at least one index.")
-                sys.exit(1)
-            # File-independent, so report it once here rather than per TIFF.
-            repeated = sorted(
-                {p for p in frame_order if frame_order.count(p) > 1}
-            )
-            if repeated:
-                print(
-                    f"Error: --frames repeats page(s) "
-                    f"{', '.join(str(p) for p in repeated)}; each page may be "
-                    f"used at most once."
-                )
                 sys.exit(1)
         except ValueError as e:
             print(f"Error parsing --frames: {e}")

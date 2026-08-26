@@ -281,6 +281,22 @@ file:
 --frames 1      561nm_15.3pct_876V/     (CH1 recorded as deselected)
 ```
 
+`--frames` may also **repeat** a page: `--frames 1,1` duplicates source
+page 1 into both `ch1` and `ch2`, as a literal copy of the same image
+pixels in both slots. The manifest stays truthful — both slots record
+`source_page: 1` with the metadata of that one channel:
+
+```
+--frames 1,1    561nm_15.3pct_876V_561nm_15.3pct_876V/   (page 1 in ch1 AND ch2)
+```
+
+> **Warning.** Duplication is a compatibility/testing feature (e.g. to
+> satisfy tooling that expects two channel folders). It must NOT be used
+> when the second detector channel contains scientifically meaningful
+> independent data — in that case keep the real slave-channel image and
+> use `analyze_matlab.py`'s default `--hval-filter master` instead (see
+> Step 3). A stderr warning is printed on every duplicated run.
+
 If `--frames` forces a rule-excluded channel (e.g. the DIC page) into a
 slot, that is allowed but recorded as `excluded_by_rule` on the slot and
 warned about on stderr.
@@ -315,7 +331,7 @@ before anything is written:
 |-------------|---------|
 | `--input`   | Folder containing raw .tif files |
 | `--output`  | Where to save the split channels (inside `data/`) |
-| `--frames`  | Comma-separated source page indices naming the pages to keep, in `ch1`, `ch2`, … order (e.g. `0,1`). May name **fewer** pages than there are resolved channels to keep a subset. Indices must be unique and in range. Optional — resolution already yields the correct pages, so this is rarely needed |
+| `--frames`  | Comma-separated source page indices naming the pages to keep, in `ch1`, `ch2`, … order (e.g. `0,1`). May name **fewer** pages than there are resolved channels to keep a subset, and may **repeat** a page (`1,1` duplicates source page 1 into both `ch1` and `ch2` — compatibility/testing only, see warning above). Indices must be in range. Optional — resolution already yields the correct pages, so this is rarely needed |
 | `--crop`    | Center crop divisor. `1` = no crop, `2` = center quarter |
 | `--dry-run` | Parse metadata and print what would be created, without writing files |
 
@@ -344,7 +360,54 @@ python analyze_matlab.py \
 | `--channels`      | Channel names matching folder names. Use `ch1` for lipid-only |
 | `--lipid-channel` | Which channel is lipid (used for thresholding) |
 | `--k-std`         | Threshold: keep if A > mean(c) + k·std(c). Default `2.0` |
-| `--output-name`   | Output filename, saved inside `--input` folder |
+| `--hval-filter`   | How the `hval_Ar` hypothesis test is used: `master` (default, require hval == 1 in the lipid/master channel only), `none` (hval not used for filtering), `all` (require hval == 1 in every requested channel) |
+| `--output-name`   | Filtered output filename, saved inside `--input` folder |
+| `--raw-output-name` | Unfiltered diagnostic filename (default: `raw_puncta_values.txt`) |
+
+#### hval filtering
+
+The default `--hval-filter master` requires the hypothesis test to pass
+only in the lipid/master channel — slave channels are deliberately **not**
+required to pass. This matters whenever the master channel identifies a
+real punctum whose signal in another channel is legitimately very weak:
+requiring slave-channel `hval == 1` would censor exactly those low-signal
+observations. Detection/localization comes from the master channel, and
+the measured slave-channel amplitudes at those same locations are kept
+regardless of their own hypothesis test:
+
+```bash
+# Default: master channel identifies puncta, weak slave signal retained
+python analyze_matlab.py \
+    --input  data/.../488nm_17.7pct_652V_561nm_15.3pct_876V \
+    --channels ch1,ch2 \
+    --lipid-channel ch1        # --hval-filter master is the default
+
+# Ignore hval entirely / require it in every channel
+python analyze_matlab.py --input data/... --channels ch1,ch2 \
+    --lipid-channel ch1 --hval-filter none
+python analyze_matlab.py --input data/... --channels ch1,ch2 \
+    --lipid-channel ch1 --hval-filter all
+```
+
+The header comments of both output files state exactly which hval policy
+was used.
+
+#### Raw diagnostic output
+
+Every run also writes `raw_puncta_values.txt` into the condition folder —
+**every** punctum/candidate present in the loaded `frameInfo` arrays,
+with `A`, `c` and `hval` for each channel and no Python-side filtering
+whatsoever (no amplitude threshold, no hval filter; negative/zero A
+values are retained). Columns for two channels:
+
+```
+source_image  A_ch1  c_ch1  hval_ch1  A_ch2  c_ch2  hval_ch2  passes_A_threshold_master  passes_hval_policy  passes_final_filter
+```
+
+The trailing `passes_*` columns are annotations only (would this row
+pass the current filter settings?) — they never remove rows. The raw
+file is written even when zero puncta pass the filter, so a too-strict
+threshold can be diagnosed by inspecting it.
 
 For **lipid-only** experiments (no protein channel):
 ```bash

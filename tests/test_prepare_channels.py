@@ -319,8 +319,6 @@ def test_frames_arity_and_range_are_validated():
         assign_slots(channels, excluded, [0, 1, 2])
     with pytest.raises(IndexError, match="page 9"):
         assign_slots(channels, excluded, [0, 9])
-    with pytest.raises(ValueError, match="repeats"):
-        assign_slots(channels, excluded, [1, 1])
     with pytest.raises(ValueError, match="at least one"):
         assign_slots(channels, excluded, [])
 
@@ -429,16 +427,78 @@ def test_full_arity_frames_still_valid_on_three_channels():
     assert group_name(slots) == "561nm_3.2pct_700V_488nm_5.0pct_600V_405nm_2.0pct_500V"
 
 
-def test_frames_subset_rejects_duplicates_and_out_of_range():
+def test_frames_subset_rejects_out_of_range():
     channels, excluded = resolve_channels(THREE_CHANNEL_INFO, n_pages=3)
-    with pytest.raises(ValueError, match="repeats"):
-        assign_slots(channels, excluded, [0, 0])
-    with pytest.raises(ValueError, match="repeats"):
-        assign_slots(channels, excluded, [1, 2, 1])
     with pytest.raises(IndexError, match="page 3"):
         assign_slots(channels, excluded, [0, 3])
     with pytest.raises(ValueError, match="only 3 channels"):
         assign_slots(channels, excluded, [0, 1, 2, 0])
+
+
+# ── --frames repeating a page duplicates it into several slots ─────────
+
+def test_frames_duplicate_page_fills_both_slots():
+    """--frames 1,1: the same source page (and its metadata) in ch1 and ch2."""
+    channels, excluded = resolve_channels(REAL_INFO, n_pages=3)
+    slots, slot_excluded = assign_slots(channels, excluded, [1, 1])
+
+    assert [c["page"] for c in slots] == [1, 1]
+    assert [c["channel"] for c in slots] == ["CH2", "CH2"]
+
+    manifest = build_channel_map(slots, slot_excluded, group_name(slots), "1,1")
+    ch1, ch2 = manifest["channels"]["ch1"], manifest["channels"]["ch2"]
+    assert ch1["source_page"] == 1
+    assert ch2["source_page"] == 1
+    # No fabricated metadata: both slots carry the metadata of the one
+    # channel that page belongs to.
+    assert ch1 == ch2
+    assert ch1["channel_name"] == "CH2"
+    assert ch1["wavelength_nm"] == 561
+
+    # The unnamed CH1 is recorded as deselected; CH3 keeps its rule reason.
+    reasons = {c["channel_name"]: c["reason"] for c in manifest["excluded_channels"]}
+    assert reasons["CH1"] == "excluded by explicit --frames selection"
+    assert "LETD" in reasons["CH3"]
+
+
+def test_frames_duplicate_page_warns():
+    channels, excluded = resolve_channels(REAL_INFO, n_pages=3)
+    slots, _ = assign_slots(channels, excluded, [1, 1])
+    warnings = override_warnings(slots, "1,1", "g")
+    assert any("duplicates source page 1" in w for w in warnings)
+    assert any("compatibility/testing" in w for w in warnings)
+
+
+def test_frames_duplicate_three_channel_with_repeat_allowed():
+    channels, excluded = resolve_channels(THREE_CHANNEL_INFO, n_pages=3)
+    slots, _ = assign_slots(channels, excluded, [1, 2, 1])
+    assert [c["page"] for c in slots] == [1, 2, 1]
+    slots0, _ = assign_slots(channels, excluded, [0, 0])
+    assert [c["page"] for c in slots0] == [0, 0]
+
+
+def test_frames_duplicate_end_to_end(tmp_path):
+    """--frames 1,1 writes the exact same pixels of page 1 into ch1 and ch2."""
+    import json
+
+    src = tmp_path / "raw"
+    src.mkdir()
+    raw = _write_source_tiff(src / "sample.tif")
+
+    out = tmp_path / "prepared"
+    _run(src, out, [1, 1], "1,1")
+
+    group_dir = next(p for p in out.iterdir() if p.is_dir())
+    manifest = json.loads((group_dir / "channel_map.json").read_text())
+
+    assert manifest["channels"]["ch1"]["source_page"] == 1
+    assert manifest["channels"]["ch2"]["source_page"] == 1
+
+    cell = group_dir / "cell1"
+    written_ch1 = tifffile.imread(str(next((cell / "ch1").glob("*.tif"))))
+    written_ch2 = tifffile.imread(str(next((cell / "ch2").glob("*.tif"))))
+    assert np.array_equal(written_ch1, written_ch2)
+    assert np.array_equal(written_ch1, raw[1])
 
 
 def test_frames_subset_end_to_end(tmp_path):
@@ -498,7 +558,15 @@ def _run(src, out, frame_order, frames_arg):
 
 
 @pytest.mark.parametrize(
-    "frame_order, frames_arg", [(None, None), ([1, 0], "1,0"), ([0, 2], "0,2")]
+    "frame_order, frames_arg",
+    [
+        (None, None),
+        ([0, 1], "0,1"),
+        ([1, 0], "1,0"),
+        ([0, 2], "0,2"),
+        ([1], "1"),
+        ([1, 1], "1,1"),
+    ],
 )
 def test_written_pixels_match_the_manifest(tmp_path, frame_order, frames_arg):
     """
