@@ -97,7 +97,7 @@
     \large \textit{From raw microscopy images to curvature-sorting plots}
 }
 \author{}
-\date{Version 2.0 \\ For users with no prior coding experience}
+\date{Version 2.1 \\ For users with no prior coding experience}
 
 % ──────────────────────────────────────────────────────────────────────
 \begin{document}
@@ -149,8 +149,11 @@ $\rho_{\text{protein}}$ rising at small diameters (high curvature).
 
 \begin{enumerate}[leftmargin=*]
     \item \textbf{Prepare images} --- split microscope TIFFs into channels
-    \item \textbf{MATLAB detection} --- fit Gaussians to each spot (external code)
-    \item \textbf{Analyze MATLAB output} --- filter puncta, export amplitudes
+    \item \textbf{Detect spots} --- fit Gaussians to each spot, with the
+    native \code{cme\_detect} program included in the repository
+    (recommended; no MATLAB needed) or with the original MATLAB
+    CMEanalysis code (reference/fallback)
+    \item \textbf{Analyze detection output} --- filter puncta, export amplitudes
     \item \textbf{Calibrate \& plot} --- DLS calibration, then make figures
 \end{enumerate}
 
@@ -250,10 +253,45 @@ uv --version
 You should see a version number like \code{uv 0.6.x}. If you get
 ``command not found,'' close and reopen the terminal again.
 
-\subsection{MATLAB and CMEanalysis}
+\subsection{Visual Studio Build Tools (for the native detection backend)}
 
-You need MATLAB installed with the CMEanalysis code from the Danuser
-Lab. If MATLAB is already installed on your computer, skip to step 3.
+The recommended detection step (Step 2, Option A) uses a small C++
+program, \code{cme\_detect}, that ships with the repository and is
+compiled once on your computer. On Windows this needs the free
+Microsoft C++ build tools:
+
+\begin{enumerate}[leftmargin=*]
+    \item Download \textbf{Build Tools for Visual Studio 2022} from
+    \href{https://visualstudio.microsoft.com/downloads/}{visualstudio.microsoft.com/downloads}
+    (under ``Tools for Visual Studio''). If you already have Visual
+    Studio 2022 installed, use its installer instead.
+    \item In the installer select the \textbf{``Desktop development
+    with C++''} workload. This includes the compiler and
+    \textbf{CMake}. Install, and reboot if asked.
+    \item Open a \emph{new} PowerShell window and check that
+    \code{cmake --version} prints a version. If it says ``not
+    recognized,'' use the \textbf{Developer PowerShell for VS 2022}
+    entry in the Start menu instead, which has \code{cmake} on its
+    path.
+\end{enumerate}
+
+On macOS/Linux you need a C++17 compiler, CMake, and the GSL and
+libtiff development packages (e.g.\ \code{brew install cmake gsl
+libtiff}). Note that the native backend has so far only been
+regression-validated on Windows. If you cannot install build tools at
+all, use the MATLAB route instead (next subsection).
+
+\subsection{MATLAB and CMEanalysis (reference/fallback only)}
+
+\begin{notebox}
+\textbf{Optional.} MATLAB is only needed if you choose the MATLAB
+route in Step 2 (Option B). The recommended native backend does not
+use MATLAB at all --- if you will use it, skip this subsection.
+\end{notebox}
+
+For the MATLAB route you need MATLAB installed with the CMEanalysis
+code from the Danuser Lab. If MATLAB is already installed on your
+computer, skip to step 3.
 
 \begin{enumerate}[leftmargin=*]
     \item \textbf{Download MATLAB.} Look for your institution's
@@ -411,6 +449,45 @@ You should see a help message listing all the options for that script.
 If you get an error, check that \code{(.venv)} appears at the start
 of your terminal prompt. If not, re-activate the venv (\S\ref{sec:activate}).
 
+\subsection{Build the native detection backend (recommended)}\label{sec:build-native}
+
+This compiles \code{cme\_detect}, the native spot detector used in
+Step 2 (Option A). Do it once; repeat only after updating the code.
+
+\textbf{Windows PowerShell} (from the repo folder):
+
+\begin{lstlisting}
+cd native_detection
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+cd ..
+\end{lstlisting}
+
+The first \code{cmake} command takes about half a minute, the second a
+few minutes. The program is now at
+\code{native\_detection\textbackslash build\textbackslash Release\textbackslash cme\_detect.exe}.
+Check it:
+
+\begin{lstlisting}
+.\native_detection\build\Release\cme_detect.exe --help
+\end{lstlisting}
+
+\textbf{macOS / Linux} (uses the system GSL and libtiff):
+
+\begin{lstlisting}
+cd native_detection
+cmake -S . -B build -DCME_USE_SYSTEM_LIBS=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+cd ..
+./native_detection/build/cme_detect --help
+\end{lstlisting}
+
+\begin{notebox}
+\textbf{No build tools?} You can skip this and use the MATLAB route in
+Step 2 (Option B) instead. Nothing else in the pipeline depends on the
+native backend.
+\end{notebox}
+
 % ═══════════════════════════════════════════════════════════════════
 \section{Folder Structure: Where to Put Your Files}
 
@@ -425,13 +502,15 @@ liposome-curvature-assay/
 |   `-- experiment_name/        <-- one subfolder per experiment
 |       `-- 488nm_5.0pct_580V_561nm_3.2pct_500V/
 |           |-- cell1/
-|           |   |-- ch1/        <-- lipid channel
-|           |   `-- ch2/        <-- protein channel
+|           |   |-- ch1/        <-- lipid channel (this example)
+|           |   `-- ch2/        <-- protein channel (this example)
 |           `-- filtered_puncta_A_values.txt
 |-- figures/                    <-- PLOTS SAVED HERE
 |-- test_data/                  <-- example DLS file (reference format)
+|-- native_detection/           <-- native C++ spot detector (cme_detect)
 |-- prepare_input.py
-|-- analyze_matlab.py
+|-- analyze_cpp.py              <-- Step 3 for the native route
+|-- analyze_matlab.py           <-- Step 3 for the MATLAB route
 |-- dls_calibration.py
 |-- plot_curvature.py
 |-- plot_histograms.py
@@ -444,7 +523,7 @@ liposome-curvature-assay/
 
 \textbf{\code{data/}} --- Put your raw TIFF images in a subfolder here
 (e.g.\ \code{data/march\_3\_experiment/}). The
-\code{prepare\_input.py} script will create the MATLAB-ready folder
+\code{prepare\_input.py} script will create the detection-ready folder
 structure inside \code{data/}. Also put your DLS \code{.xlsx} file
 here.
 
@@ -466,7 +545,8 @@ git. Your microscopy data stays on your computer only.
 
 \textbf{What this does.} Takes your raw multi-frame TIFF files from
 the microscope, splits them into separate per-channel folders, and
-organizes them into the structure that MATLAB expects. Files are
+organizes them into the structure that the detection step (native
+\code{cme\_detect} or MATLAB CMEanalysis) expects. Files are
 automatically grouped by laser configuration. Olympus FV3000 metadata
 is parsed for active lasers (any laser with transmissivity $> 0$),
 each channel's excitation laser, and each channel's PMT voltage. The
@@ -570,25 +650,133 @@ example:
 data/march_3_experiment_matlab/
   `-- 488nm_5.0pct_580V_561nm_3.2pct_500V/
       |-- cell1/
-      |   |-- ch1/      <-- lipid (488 nm)
-      |   `-- ch2/      <-- protein (561 nm)
+      |   |-- ch1/      <-- 488 nm (lipid in this example)
+      |   `-- ch2/      <-- 561 nm (protein in this example)
       `-- cell2/
           |-- ch1/
           `-- ch2/
 \end{lstlisting}
 
+\begin{notebox}
+\textbf{Which folder is which?} Each condition folder also gets a
+\code{channel\_map.json} recording, for every \code{ch<i>} folder,
+the physical acquisition channel it holds: laser wavelength,
+transmissivity, detector, PMT voltage and dye name. Channel folders
+are ordered by \emph{wavelength}, not by role --- so the lipid
+channel is \textbf{not always \code{ch1}}. Check
+\code{channel\_map.json} (or the recorded wavelength/voltage
+metadata) to identify which folder holds your lipid channel; you
+will need this in Step 2 to pick the master channel.
+\end{notebox}
+
 % ═══════════════════════════════════════════════════════════════════
-\section{Step 2: Run MATLAB Detection}
+\section{Step 2: Run Spot Detection}
 
 \textbf{What this does.} Fits 2D Gaussians to every sub-diffraction-
 limit fluorescent spot in each channel image. This identifies
 individual liposomes and measures their amplitudes (brightness),
 backgrounds, and a quality flag.
 
-These instructions use \textbf{CMEanalysis}, the external MATLAB code
-base from the Danuser Lab that you installed in Prerequisites.
+There are two ways to run this step. Both implement the same
+CMEanalysis detection algorithm (Danuser Lab), and Step 3 filters
+their results identically:
 
-\subsection*{Procedure}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Option A (recommended): native \code{cme\_detect}
+    backend.} A C++ program included in this repository
+    (\code{native\_detection/}). No MATLAB needed, runs in seconds to
+    minutes, fully scriptable. It was regression-validated against
+    the original MATLAB CMEanalysis and reproduced its detection and
+    filter decisions on the tested data sets, with only negligible
+    floating-point differences in rare numerically unstable fits.
+    \item \textbf{Option B (reference/fallback): MATLAB CMEanalysis.}
+    The original implementation. Use it if you cannot build the native
+    backend, or when you want to cross-check against the reference.
+\end{itemize}
+
+\subsection*{Option A (recommended): native detection with \code{cme\_detect}}
+
+You need the executable built once (\S\ref{sec:build-native}).
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Identify your lipid/master channel.} Open the
+    \code{channel\_map.json} that \code{prepare\_input.py} wrote into
+    the condition folder and check which physical acquisition channel
+    (laser wavelength, detector voltage, dye) each
+    \code{ch1}/\code{ch2} folder holds. The lipid channel is
+    \textbf{not necessarily \code{ch1}} --- either folder may hold it.
+
+    \item \textbf{Run the detector.} \code{--channels} lists the
+    channel folders with the \textbf{master (lipid) channel first},
+    and \code{--master} names that same first channel. The example
+    assumes \code{ch1} is the lipid channel; if \code{ch2} is, use
+    \code{--channels ch2,ch1 --master ch2}.
+
+    \textbf{Windows PowerShell:}
+    \begin{lstlisting}
+& ".\native_detection\build\Release\cme_detect.exe" `
+    --input "data\march_3_experiment_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V" `
+    --channels ch1,ch2 `
+    --master ch1 `
+    --seed 1 `
+    --threads 8
+    \end{lstlisting}
+
+    \textbf{macOS / Linux} (after building with system libraries,
+    \S\ref{sec:build-native}):
+    \begin{lstlisting}
+./native_detection/build/cme_detect \
+    --input data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V \
+    --channels ch1,ch2 \
+    --master ch1 \
+    --seed 1 \
+    --threads 8
+    \end{lstlisting}
+
+    \code{--seed 1} is the reproducible equivalent of the \code{rng(1)}
+    used in the MATLAB route (it seeds the data-derived PSF sigma
+    estimation). \code{--threads} sets how many CPU cores are used;
+    the results do not depend on it. The program refuses to run if
+    \code{--master} is not the first entry of \code{--channels}.
+
+    \item \textbf{Write down the channel order you used.} Step 3
+    (\code{analyze\_cpp.py}) must be given the same \code{--channels}
+    list, master first; it also checks the order recorded in the
+    output files and stops if they disagree.
+\end{enumerate}
+
+\subsubsection*{Verifying success (native)}
+
+\begin{sloppypar}
+The master channel folder of every cell now has a \code{Detection}
+subfolder containing \code{detection\_cpp.tsv} (plus a mask image),
+and the condition folder has a \code{cme\_detect\_output} folder with
+\code{detections\_all.tsv}, \code{summary.tsv} and \code{sigma.tsv}.
+Only the master channel gets a \code{Detection} folder:
+\end{sloppypar}
+
+\begin{lstlisting}
+data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/
+  |-- cme_detect_output/
+  |   |-- detections_all.tsv
+  |   |-- summary.tsv
+  |   `-- sigma.tsv
+  `-- cell1/
+      |-- ch1/
+      |   `-- Detection/
+      |       |-- detection_cpp.tsv   <-- this file must exist
+      |       `-- dmasks.tif
+      `-- ch2/
+          `-- (TIFF image only, no Detection folder)
+\end{lstlisting}
+
+\subsection*{Option B (reference/fallback): MATLAB CMEanalysis}
+
+These instructions use \textbf{CMEanalysis}, the external MATLAB code
+base from the Danuser Lab (see Prerequisites). Skip this subsection if
+you used Option A.
+
+\subsubsection*{Procedure (MATLAB)}
 
 \begin{enumerate}[leftmargin=*]
     \item \textbf{Open MATLAB and navigate to the CMEanalysis folder.}
@@ -614,31 +802,60 @@ data = loadConditionData();
     configuration, e.g.\
     \code{488nm\_5.0pct\_580V\_561nm\_3.2pct\_500V}).
 
+    \item \textbf{Identify your lipid/master channel.} Before
+    selecting anything, check which physical acquisition channel each
+    \code{ch1}/\code{ch2} folder holds, using the
+    \code{channel\_map.json} written by \code{prepare\_input.py} (and
+    the wavelength/voltage encoded in the condition folder name). The
+    lipid channel is \textbf{not necessarily \code{ch1}} --- either
+    folder may hold it, depending on the acquisition.
+
     \item \textbf{Select channels.} The program will ask you to select
-    the \emph{first (master) channel}. Select the lipid channel
-    folder (this should be \code{ch1}). It will then ask for the
-    remaining channels --- select \code{ch2} (and \code{ch3}, etc.\
-    if you have more).
+    the \emph{first (master) channel}. Select the \textbf{lipid
+    channel folder} you identified above --- whichever of \code{ch1}
+    or \code{ch2} it is. It will then ask for the remaining (slave)
+    channels --- select the other channel folder(s).
+
+    \begin{warnbox}
+    \textbf{Write down the selection order.} The order you select
+    channels here is the order CMEanalysis stores them in
+    \code{frameInfo}, and Step 3 (\code{analyze\_matlab.py}) must be
+    given \emph{exactly the same order} via \code{--channels}, with
+    the master channel first.
+    \end{warnbox}
 
     \item \textbf{Enter fluorophore names.} The program will ask for a
     fluorescent marker for each channel. Type the fluorophore name
     matching that channel. Common ones include \code{texasred} for
     Texas Red and \code{egfp} for EGFP. If the program does not
     recognize the name, it will ask you to enter the emission
-    wavelength in nm instead.
+    wavelength in nm instead. (Note: with a plain
+    \code{runDetection(data)} the PSF sigma is estimated from the
+    image data itself --- the marker name you enter here is not what
+    determines the default sigma estimate.)
 
     \item \textbf{Run the detection.} The default mode determines the
     Gaussian-approximated PSF standard deviation directly from your
-    images. Type:
+    images. For reproducibility, seed MATLAB's random number
+    generator immediately before running the detection:
 
     \begin{lstlisting}
+rng(1);
 runDetection(data);
     \end{lstlisting}
+
+    Setting the seed right before \code{runDetection} makes
+    CMEanalysis's data-derived PSF sigma estimation reproducible: the
+    sigma-estimation step performs Gaussian-mixture fitting and can
+    otherwise return slightly different sigma estimates on repeated
+    runs of the same data, which then propagates into the detection
+    and the fitted amplitudes.
 
     If you have already run a detection on this folder and want to
     redo it (e.g.\ after changing parameters):
 
     \begin{lstlisting}
+rng(1);
 runDetection(data, 'Overwrite', true);
     \end{lstlisting}
 
@@ -658,12 +875,14 @@ runDetection(data, 'Overwrite', true, 'Sigma', sigma_value);
     with this data --- you can close them.
 \end{enumerate}
 
-\subsection*{Verifying success}
+\subsubsection*{Verifying success (MATLAB)}
 
-When MATLAB finishes, verify that the master channel (\code{ch1})
+When MATLAB finishes, verify that the master channel folder --- the
+one you selected \emph{first} in \code{loadConditionData} ---
 now has a \code{Detection} subfolder. Note that \textbf{only the
-master/lipid channel gets a Detection folder} --- \code{ch2} will
-just contain the TIFF file. This is expected.
+master/lipid channel gets a Detection folder} --- the slave channel
+folder(s) will just contain the TIFF file. This is expected. In the
+example below the master was \code{ch1}:
 
 \begin{lstlisting}
 data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/
@@ -683,16 +902,82 @@ Python step reads these fields.
 \end{notebox}
 
 % ═══════════════════════════════════════════════════════════════════
-\section{Step 3: Analyze MATLAB Output}
+\section{Step 3: Analyze Detection Output}
 
-\textbf{What this does.} Reads the \code{.mat} detection files,
+\textbf{What this does.} Reads the detection files from Step 2,
 filters out noise and poorly-fit spots, and exports a single
 tab-separated text file with the kept amplitude values for every
 liposome that passed quality control.
 
-\subsection*{Run the script}
+Use the script that matches the Step 2 route you took. Both take the
+same flags, apply the identical filter (they share the same code) and
+write identical output files:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Option A (native \code{cme\_detect}):}
+    \code{analyze\_cpp.py}, which reads the
+    \code{detection\_cpp.tsv} file in each cell's
+    \code{<master>/Detection/} folder.
+    \item \textbf{Option B (MATLAB):} \code{analyze\_matlab.py}, which
+    reads the \code{detection\_v2.mat} file in each cell's
+    \code{<master>/Detection/} folder.
+\end{itemize}
+
+\subsection*{Channel order matters}
+
+\code{--channels} must list the channel folders in the \textbf{exact
+analysis order} --- the list you gave to \code{cme\_detect --channels},
+or the order you selected them in MATLAB \code{loadConditionData} (the
+order stored in \code{frameInfo}) --- \emph{not} in numerical folder
+order. The first entry is the master/source channel, so
+\code{--lipid-channel} must equal the \textbf{first} entry of
+\code{--channels}. The scripts check this and stop with an error if
+the order is inconsistent, because a mismatch would attach the
+detection results to the wrong physical channel.
+\code{analyze\_cpp.py} additionally compares \code{--channels} with
+the order recorded in the \code{cme\_detect} output and stops on a
+mismatch.
+
+\begin{itemize}[leftmargin=*]
+    \item If \code{ch1} was the master and \code{ch2} the slave:
+    \code{--channels ch1,ch2 --lipid-channel ch1}
+    \item If \code{ch2} was the master and \code{ch1} the slave:
+    \code{--channels ch2,ch1 --lipid-channel ch2}
+\end{itemize}
+
+\subsection*{Run the script (Option A, native route)}
+
+The commands below assume \code{ch1} was the master --- adjust the two
+channel flags to match \emph{your} recorded order.
 
 \textbf{macOS / Linux (two-channel: lipid + protein):}
+
+\begin{lstlisting}
+python analyze_cpp.py \
+    --input data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V \
+    --channels ch1,ch2 \
+    --lipid-channel ch1 \
+    --k-std 2.0 \
+    --output-name filtered_puncta_A_values.txt
+\end{lstlisting}
+
+\textbf{Windows PowerShell:}
+
+\begin{lstlisting}
+python analyze_cpp.py `
+    --input data\march_3_experiment_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V `
+    --channels ch1,ch2 `
+    --lipid-channel ch1 `
+    --k-std 2.0 `
+    --output-name filtered_puncta_A_values.txt
+\end{lstlisting}
+
+\subsection*{Run the script (Option B, MATLAB route)}
+
+Identical, with \code{analyze\_matlab.py} in place of
+\code{analyze\_cpp.py}:
+
+\textbf{macOS / Linux:}
 
 \begin{lstlisting}
 python analyze_matlab.py \
@@ -717,10 +1002,11 @@ python analyze_matlab.py `
 \subsection*{Lipid-only experiments}
 
 If you only have a lipid channel (no protein), use \code{--channels
-ch1} and the same channel for \code{--lipid-channel}:
+ch1} and the same channel for \code{--lipid-channel} (with
+\code{analyze\_matlab.py} for the MATLAB route):
 
 \begin{lstlisting}
-python analyze_matlab.py \
+python analyze_cpp.py \
     --input data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V \
     --channels ch1 \
     --lipid-channel ch1
@@ -728,18 +1014,24 @@ python analyze_matlab.py \
 
 \subsection*{All flags}
 
+Both scripts accept the same flags.
+
 \begin{tabularx}{\linewidth}{l X}
 \toprule
 \textbf{Flag} & \textbf{Meaning} \\
 \midrule
 \flag{--input}         & Condition folder (the laser-configuration
                          folder from Step 1). \\
-\flag{--channels}      & Channel names matching folder names, comma-
-                         separated. Use \code{ch1,ch2} for lipid +
-                         protein. Use \code{ch1} for lipid-only. \\
-\flag{--lipid-channel} & Which channel is the lipid (used to compute
-                         the intensity threshold). Almost always
-                         \code{ch1}. \\
+\flag{--channels}      & Channel folder names, comma-separated, in the
+                         \textbf{exact analysis order}: as given to
+                         \code{cme\_detect --channels}, or as selected
+                         in MATLAB \code{loadConditionData} / stored in
+                         \code{frameInfo}. The first entry is the
+                         master/source channel. Use a single name
+                         (e.g.\ \code{ch1}) for lipid-only. \\
+\flag{--lipid-channel} & The lipid/master channel (used to compute
+                         the intensity threshold). Must equal the
+                         \textbf{first} entry of \code{--channels}. \\
 \flag{--k-std}         & Threshold strictness. Keeps puncta where
                          amplitude $> \mu_c + k \cdot \sigma_c$, with
                          $\mu_c$ and $\sigma_c$ the mean and standard
@@ -762,8 +1054,10 @@ data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V/
   filtered_puncta_A_values.txt
 \end{lstlisting}
 
-The file has columns: \code{source\_image}, \code{A\_ch1} (lipid
-amplitude), \code{A\_ch2} (protein amplitude). Each row is one
+The file has one amplitude column per channel, in the same order as
+\code{--channels} (master/lipid first) --- e.g.\
+\code{source\_image}, \code{A\_ch1} (lipid amplitude), \code{A\_ch2}
+(protein amplitude) if \code{ch1} was the master. Each row is one
 liposome. Open it in Excel to spot-check.
 
 % ═══════════════════════════════════════════════════════════════════
@@ -1159,8 +1453,10 @@ have new data:
     \code{data/}.
     \item Run \code{prepare\_input.py} (Step 1) --- with
     \code{--dry-run} first to verify.
-    \item Run MATLAB detection (Step 2).
-    \item Run \code{analyze\_matlab.py} (Step 3).
+    \item Run spot detection (Step 2) --- \code{cme\_detect}
+    (recommended) or MATLAB CMEanalysis (fallback).
+    \item Run \code{analyze\_cpp.py} (native route) or
+    \code{analyze\_matlab.py} (MATLAB route) (Step 3).
     \item Run \code{dls\_calibration.py} (Step 4) --- copy down the
     conversion factor.
     \item Run \code{plot\_curvature.py} (Step 5) with that factor and
@@ -1224,10 +1520,14 @@ path contains spaces, wrap it in double quotes.
 the wrong folder. It should be the folder containing your TIFFs
 directly, not a parent or sibling.
 
-\textbf{``\code{missing detection file}.''} CMEanalysis hasn't been
-run on that cell, or it failed silently. Open the cell folder in
-Finder/Explorer and check whether \code{ch1/Detection/} exists with
-a \code{detection\_v2.mat} inside.
+\textbf{``\code{missing detection file}.''} Detection hasn't been run
+on that cell, or it failed. Open the cell folder in Finder/Explorer
+and check whether the master channel folder (the channel you put
+first in \code{cme\_detect --channels}, or selected first in MATLAB,
+e.g.\ \code{ch1}) has a \code{Detection/} subfolder containing
+\code{detection\_cpp.tsv} (native route) or \code{detection\_v2.mat}
+(MATLAB route). Also make sure you are running the script matching
+your route (\code{analyze\_cpp.py} vs.\ \code{analyze\_matlab.py}).
 
 \textbf{Path with spaces causes an error.} Wrap the entire path in
 double quotes:
@@ -1242,10 +1542,43 @@ python prepare_input.py --input "data/march 3 experiment" ...
 in \code{--frames} don't match what's in the TIFF. Open one TIFF in
 ImageJ and check how many frames it has. Frame indices start at 0.
 
+\textbf{Setup: ``\code{cmake} is not recognized'' (Windows).} The
+Visual Studio Build Tools are missing the ``Desktop development with
+C++'' workload, or the terminal was opened before installing. Re-run
+the installer, then open a new terminal --- or use \textbf{Developer
+PowerShell for VS 2022} from the Start menu. If you cannot install
+build tools, use the MATLAB route (Step 2, Option B).
+
+\textbf{Step 2: ``\code{--master (...) must equal the first entry of
+--channels}.''} \code{cme\_detect} refuses to reorder channels. Put
+the lipid/master channel first in \code{--channels} and name the same
+channel in \code{--master}, e.g.\ \code{--channels ch2,ch1 --master
+ch2}.
+
+\textbf{Step 2: \code{cme\_detect} says ``\code{Channel directory not
+found}'' or ``\code{No movies found}.''} \code{--input} must be the
+condition folder (the one named after the laser configuration) that
+contains the \code{cell1/}, \code{cell2/}, \ldots\ folders, each with
+the channel subfolders named in \code{--channels}.
+
 \textbf{Step 2: MATLAB detection produced no \code{Detection/}
-folder.} Make sure you set \code{ch1} as the master channel in
-\code{loadConditionData()}. Only the master channel gets a
-\code{Detection/} folder.
+folder.} Make sure you selected your lipid/master channel
+\emph{first} in \code{loadConditionData()}. Only the master (first-
+selected) channel gets a \code{Detection/} folder.
+
+\begin{sloppypar}
+\textbf{Step 3: ``\code{--lipid-channel ... is not the FIRST entry
+in --channels}.''} \code{--channels} must repeat the exact order you
+gave to \code{cme\_detect} (or selected in MATLAB), master first, and
+\code{--lipid-channel} must equal that first entry. E.g.\ if
+\code{ch2} was the master and \code{ch1} the slave, use
+\code{--channels ch2,ch1 --lipid-channel ch2}.
+\end{sloppypar}
+
+\textbf{Step 3: ``\code{channel order mismatch}'' from
+\code{analyze\_cpp.py}.} The \code{--channels} list differs from the
+one \code{cme\_detect} was run with (the output files record it).
+Pass exactly the same list, master first.
 
 \textbf{Step 3: ``No puncta passed the filter.''} The threshold
 (\code{--k-std}) is too strict, or signal is too low. Try

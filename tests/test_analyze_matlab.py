@@ -18,7 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import analyze_matlab  # noqa: E402
-from tests.conftest import write_detection_mat  # noqa: E402
+from tests.conftest import CELL1, write_detection_mat  # noqa: E402
 
 
 def run_analyze(monkeypatch, argv):
@@ -123,6 +123,70 @@ def test_raw_columns_scale_with_channel_count(condition_folder, monkeypatch):
         "passes_final_filter",
     ]
     assert len(rows) == 10
+
+
+# ── Channel-order validation ───────────────────────────────────────────
+#
+# --channels must be given in MATLAB loadConditionData / frameInfo order,
+# whose first entry is the master/source channel — so the first entry
+# must equal --lipid-channel. Either physical folder may be the master.
+
+def test_channel_order_valid_ch1_master(condition_folder, monkeypatch):
+    """--channels ch1,ch2 --lipid-channel ch1 is accepted."""
+    code = run_analyze(
+        monkeypatch,
+        ["--input", str(condition_folder),
+         "--channels", "ch1,ch2", "--lipid-channel", "ch1"],
+    )
+    assert code == 0
+
+
+def test_channel_order_valid_ch2_master(tmp_path, monkeypatch):
+    """--channels ch2,ch1 --lipid-channel ch2 is accepted (ch2 selected
+    first in MATLAB, so the detection lives under ch2/)."""
+    condition = tmp_path / "condition"
+    write_detection_mat(
+        condition / "cell1" / "ch2" / "Detection" / "detection_v2.mat",
+        CELL1["A"], CELL1["c"], CELL1["h"],
+    )
+    (condition / "cell1" / "ch1").mkdir(parents=True, exist_ok=True)
+
+    code = run_analyze(
+        monkeypatch,
+        ["--input", str(condition),
+         "--channels", "ch2,ch1", "--lipid-channel", "ch2"],
+    )
+    assert code == 0
+    _, header, rows = read_table(condition / "filtered_puncta_A_values.txt")
+    # Columns follow the given (MATLAB) order: master ch2 first.
+    assert header == ["source_image", "A_ch2", "A_ch1"]
+    assert len(rows) == CELL1["expected_kept"]
+
+
+@pytest.mark.parametrize(
+    "channels,lipid",
+    [("ch1,ch2", "ch2"), ("ch2,ch1", "ch1")],
+)
+def test_channel_order_mismatch_rejected(
+    condition_folder, monkeypatch, capsys, channels, lipid
+):
+    """--lipid-channel not first in --channels fails loudly, writes nothing."""
+    code = run_analyze(
+        monkeypatch,
+        ["--input", str(condition_folder),
+         "--channels", channels, "--lipid-channel", lipid],
+    )
+    assert code == 1
+    out = capsys.readouterr().out
+    # The error explains the required MATLAB selection / frameInfo order.
+    assert "FIRST entry" in out
+    assert "loadConditionData" in out
+    assert "frameInfo" in out
+    assert "master/source channel" in out
+    assert "--channels ch2,ch1 --lipid-channel ch2" in out
+    # Rejected before any output file is written.
+    assert not (condition_folder / "raw_puncta_values.txt").exists()
+    assert not (condition_folder / "filtered_puncta_A_values.txt").exists()
 
 
 # ── hval policies ──────────────────────────────────────────────────────

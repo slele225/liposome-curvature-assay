@@ -2,6 +2,12 @@
 Analyze MATLAB detection results (detection_v2.mat) and export puncta
 amplitude values as tab-separated text files.
 
+--channels must list the channel folders in the exact order they were
+selected in MATLAB loadConditionData (the order stored in frameInfo).
+The first channel selected in MATLAB is the master/source channel, so
+the first --channels entry must equal --lipid-channel; any other order
+is rejected rather than silently reinterpreted.
+
 Two outputs are written into the condition folder:
 
   raw_puncta_values.txt (always written)
@@ -106,6 +112,108 @@ def parse_channel_list(s: str):
     return parts
 
 
+# ── Shared filter / writer logic ───────────────────────────────────────
+#
+# These functions are the single definition of the SLiC puncta filter and
+# of the two output tables. analyze_cpp.py (native cme_detect backend)
+# imports them, so both detection backends are filtered and exported
+# identically.
+
+def compute_filter_mask(A, c, h, master_idx, k_std, hval_policy, n_channels):
+    """
+    Per-cell filter decision.
+
+    A, c, h are (n_puncta, n_channels) arrays in analysis (master-first)
+    order. Returns (passes_A, passes_h, mask, c_thr) where
+
+      c_thr    = mean(c_master) + k_std * std(c_master)   (np.std, ddof=0)
+      passes_A = A_master > c_thr
+      passes_h = per --hval-filter policy: 'master' requires hval == 1 in
+                 the master channel only, 'none' ignores hval, 'all'
+                 requires hval == 1 in every one of the n_channels
+      mask     = passes_A & passes_h
+    """
+    n = A.shape[0]
+    c_master = c[:, master_idx]
+    A_master = A[:, master_idx]
+    c_thr = float(np.mean(c_master) + k_std * np.std(c_master))
+
+    passes_A = A_master > c_thr
+    if hval_policy == "master":
+        passes_h = h[:, master_idx] == 1
+    elif hval_policy == "none":
+        passes_h = np.ones(n, dtype=bool)
+    elif hval_policy == "all":
+        cols = list(range(n_channels))
+        passes_h = np.all(h[:, cols] == 1, axis=1)
+    else:
+        raise ValueError(f"Unknown hval policy: {hval_policy!r}")
+    mask = passes_A & passes_h
+    return passes_A, passes_h, mask, c_thr
+
+
+def write_raw_table(path, all_rows, channel_names, master_name, k_std,
+                    hval_policy, loaded_from, source_line):
+    """
+    Write the unfiltered diagnostic table (every punctum, no rows removed).
+
+    ``loaded_from`` names the per-cell detection file the values came from
+    (e.g. 'detection_v2.mat'); ``source_line`` is the free-text location
+    written after '# Source:'.
+    """
+    raw_headers = ["source_image"]
+    for ch in channel_names:
+        raw_headers.extend([f"A_{ch}", f"c_{ch}", f"hval_{ch}"])
+    raw_headers.extend(
+        ["passes_A_threshold_master", "passes_hval_policy", "passes_final_filter"]
+    )
+
+    with open(path, "w", encoding="utf-8") as fout:
+        fout.write("# RAW CMEanalysis puncta values\n")
+        fout.write("# NO Python-side background/amplitude threshold has been applied.\n")
+        fout.write("# NO hval filtering has been applied.\n")
+        fout.write(f"# Rows contain the raw A, c, and hval_Ar values loaded from {loaded_from}.\n")
+        fout.write(f"# Lipid/master channel: {master_name}\n")
+        fout.write(f"# Channels in order: {', '.join(channel_names)}\n")
+        fout.write(f"# Rows: {len(all_rows)}\n")
+        fout.write(f"# Source: {source_line}\n")
+        fout.write(
+            "# The passes_* columns are annotations only (1 = the row would "
+            "pass that criterion under the current settings); no rows were "
+            "removed based on them.\n"
+        )
+        fout.write(f"# Annotation settings: k_std = {k_std}, hval policy = "
+                   f"{hval_policy} ({describe_hval_policy(hval_policy, master_name, channel_names)})\n")
+        fout.write("\t".join(raw_headers) + "\n")
+
+        for row in all_rows:
+            source = row[0]
+            vals = [f"{v:.10g}" for v in row[1:]]
+            fout.write("\t".join([source] + vals) + "\n")
+
+
+def write_filtered_table(path, filtered_rows, channel_names, master_name,
+                         k_std, hval_policy):
+    """Write the filtered A-value table consumed by the downstream scripts."""
+    headers = ["source_image"] + [f"A_{ch}" for ch in channel_names]
+
+    with open(path, "w", encoding="utf-8") as fout:
+        fout.write("# Filtered puncta A values\n")
+        fout.write(f"# Lipid/master channel: {master_name}\n")
+        fout.write(f"# Channels in order: {', '.join(channel_names)}\n")
+        fout.write(f"# Threshold: A_master > mean(c) + {k_std} * std(c)\n")
+        fout.write(
+            f"# hval policy: {hval_policy} "
+            f"({describe_hval_policy(hval_policy, master_name, channel_names)})\n"
+        )
+        fout.write("\t".join(headers) + "\n")
+
+        for row in filtered_rows:
+            source = row[0]
+            vals = [f"{v:.10g}" for v in row[1:]]
+            fout.write("\t".join([source] + vals) + "\n")
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 def main():
@@ -120,12 +228,17 @@ def main():
     parser.add_argument(
         "--channels",
         required=True,
-        help='Comma-separated channel names, e.g. "ch1,ch2"',
+        help="Comma-separated channel folder names in the EXACT order they "
+             "were selected in MATLAB loadConditionData (the order stored "
+             "in frameInfo). The first entry is the master/source channel. "
+             'E.g. "ch2,ch1" if ch2 was selected first as master.',
     )
     parser.add_argument(
         "--lipid-channel",
         required=True,
-        help='Name of the lipid/master channel, e.g. "ch1"',
+        help="Name of the lipid/master channel. Must equal the FIRST entry "
+             "of --channels, because the first channel selected in MATLAB "
+             "is the master/source channel.",
     )
     parser.add_argument(
         "--k-std",
@@ -174,6 +287,22 @@ def main():
         print(f"Error: lipid channel '{master_name}' not in --channels {channel_names}")
         sys.exit(1)
 
+    if channel_names[0] != master_name:
+        print(
+            f"Error: --lipid-channel '{master_name}' is not the FIRST entry in "
+            f"--channels {channel_names}.\n"
+            "--channels must be supplied in the exact order the channels were "
+            "selected in MATLAB loadConditionData, which is the order stored "
+            "in frameInfo. The first channel selected in MATLAB is the "
+            "master/source channel, so --lipid-channel must equal the first "
+            "entry of --channels.\n"
+            "For example, if ch2 was selected first (master) and ch1 second "
+            "(slave), use:  --channels ch2,ch1 --lipid-channel ch2\n"
+            "Refusing to continue: a mismatched order would attach MATLAB "
+            "columns to the wrong physical channel."
+        )
+        sys.exit(1)
+
     master_idx = channel_names.index(master_name)
     other_names = [ch for ch in channel_names if ch != master_name]
 
@@ -198,6 +327,10 @@ def main():
     print(f"Channels:         {channel_names}")
     print(f"Lipid channel:    {master_name}")
     print(f"Other channels:   {other_names}")
+    print("MATLAB/frameInfo channel mapping:")
+    for i, ch_name in enumerate(channel_names):
+        tag = "  [MASTER / LIPID]" if ch_name == master_name else ""
+        print(f"  column {i} -> {ch_name}{tag}")
     print(f"k_std:            {k_std}")
     print(f"hval policy:      {hval_policy} ({describe_hval_policy(hval_policy, master_name, channel_names)})")
     print("-" * 70)
@@ -235,19 +368,9 @@ def main():
                             f"columns."
                         )
 
-            c_master = c[:, master_idx]
-            A_master = A[:, master_idx]
-            c_thr = float(np.mean(c_master) + k_std * np.std(c_master))
-
-            passes_A = A_master > c_thr
-            if hval_policy == "master":
-                passes_h = h[:, master_idx] == 1
-            elif hval_policy == "none":
-                passes_h = np.ones(n, dtype=bool)
-            else:  # "all"
-                cols = list(range(len(channel_names)))
-                passes_h = np.all(h[:, cols] == 1, axis=1)
-            mask = passes_A & passes_h
+            passes_A, passes_h, mask, c_thr = compute_filter_mask(
+                A, c, h, master_idx, k_std, hval_policy, len(channel_names)
+            )
             kept = int(np.sum(mask))
             total_seen += n
             total_kept += kept
@@ -289,38 +412,14 @@ def main():
 
     # ── Write raw diagnostic output (ALWAYS, before any filter exit) ────
     raw_txt_path = os.path.join(condition_folder, raw_txt_name)
-    raw_headers = ["source_image"]
-    for ch in channel_names:
-        raw_headers.extend([f"A_{ch}", f"c_{ch}", f"hval_{ch}"])
-    raw_headers.extend(
-        ["passes_A_threshold_master", "passes_hval_policy", "passes_final_filter"]
+    write_raw_table(
+        raw_txt_path, all_rows, channel_names, master_name, k_std, hval_policy,
+        loaded_from="detection_v2.mat",
+        source_line=(
+            f"cell*/{master_name}/Detection/detection_v2.mat "
+            f"(frameInfo fields A, c, hval_Ar)"
+        ),
     )
-
-    with open(raw_txt_path, "w", encoding="utf-8") as fout:
-        fout.write("# RAW CMEanalysis puncta values\n")
-        fout.write("# NO Python-side background/amplitude threshold has been applied.\n")
-        fout.write("# NO hval filtering has been applied.\n")
-        fout.write("# Rows contain the raw A, c, and hval_Ar values loaded from detection_v2.mat.\n")
-        fout.write(f"# Lipid/master channel: {master_name}\n")
-        fout.write(f"# Channels in order: {', '.join(channel_names)}\n")
-        fout.write(f"# Rows: {len(all_rows)}\n")
-        fout.write(
-            f"# Source: cell*/{master_name}/Detection/detection_v2.mat "
-            f"(frameInfo fields A, c, hval_Ar)\n"
-        )
-        fout.write(
-            "# The passes_* columns are annotations only (1 = the row would "
-            "pass that criterion under the current settings); no rows were "
-            "removed based on them.\n"
-        )
-        fout.write(f"# Annotation settings: k_std = {k_std}, hval policy = "
-                   f"{hval_policy} ({describe_hval_policy(hval_policy, master_name, channel_names)})\n")
-        fout.write("\t".join(raw_headers) + "\n")
-
-        for row in all_rows:
-            source = row[0]
-            vals = [f"{v:.10g}" for v in row[1:]]
-            fout.write("\t".join([source] + vals) + "\n")
 
     print(f"\nRaw diagnostic values ({len(all_rows)} rows) saved to {raw_txt_path}")
 
@@ -331,23 +430,10 @@ def main():
         sys.exit(1)
 
     filtered_txt_path = os.path.join(condition_folder, filtered_txt_name)
-    headers = ["source_image"] + [f"A_{ch}" for ch in channel_names]
-
-    with open(filtered_txt_path, "w", encoding="utf-8") as fout:
-        fout.write("# Filtered puncta A values\n")
-        fout.write(f"# Lipid/master channel: {master_name}\n")
-        fout.write(f"# Channels in order: {', '.join(channel_names)}\n")
-        fout.write(f"# Threshold: A_master > mean(c) + {k_std} * std(c)\n")
-        fout.write(
-            f"# hval policy: {hval_policy} "
-            f"({describe_hval_policy(hval_policy, master_name, channel_names)})\n"
-        )
-        fout.write("\t".join(headers) + "\n")
-
-        for row in filtered_rows:
-            source = row[0]
-            vals = [f"{v:.10g}" for v in row[1:]]
-            fout.write("\t".join([source] + vals) + "\n")
+    write_filtered_table(
+        filtered_txt_path, filtered_rows, channel_names, master_name,
+        k_std, hval_policy,
+    )
 
     print(f"DONE: {len(filtered_rows)} points saved to {filtered_txt_path}")
     sys.exit(0)

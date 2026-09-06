@@ -142,3 +142,69 @@ def condition_folder(tmp_path: Path) -> Path:
         )
         (condition / name / "ch2").mkdir(parents=True, exist_ok=True)
     return condition
+
+
+# ── Native (cme_detect) detection table builder ────────────────────────
+
+# Per-channel column names in the order cme_detect's write_header() emits
+# them (native_detection/src/output.cpp).
+CME_DETECT_CHANNEL_FIELDS = [
+    "x", "y", "A", "c", "x_pstd", "y_pstd", "A_pstd", "c_pstd", "sigma_r",
+    "SE_sigma_r", "RSS", "pval_Ar", "hval_Ar", "hval_AD", "isPSF", "s",
+    "dRange_min", "dRange_max",
+]
+CME_DETECT_TRAILING_FIELDS = ["x_init", "y_init", "maskA", "maskN", "mask_Ar"]
+
+
+def write_detection_tsv(path: Path, A: np.ndarray, c: np.ndarray,
+                        hval: np.ndarray, channels=("ch1", "ch2")):
+    """
+    Write a ``detection_cpp.tsv`` shaped like cme_detect's per-movie table.
+
+    Only A, c and hval_Ar carry the given values; every other field is a
+    placeholder. ``channels`` is the order cme_detect was given, master
+    first, and defines the per-channel column order in the header.
+    """
+    A = np.asarray(A, dtype=float)
+    c = np.asarray(c, dtype=float)
+    hval = np.asarray(hval, dtype=float)
+    channels = list(channels)
+    assert A.shape[1] == len(channels)
+
+    header = ["movie", "frame", "index", "source_image"]
+    for ch in channels:
+        header.extend(f"{f}_{ch}" for f in CME_DETECT_CHANNEL_FIELDS)
+    header.extend(CME_DETECT_TRAILING_FIELDS)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    movie = path.parent.parent.parent.name
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\t".join(header) + "\n")
+        for i in range(A.shape[0]):
+            row = [movie, "1", str(i + 1), f"{movie}/{channels[0]}/img.tif"]
+            for j, _ch in enumerate(channels):
+                vals = {f: "0" for f in CME_DETECT_CHANNEL_FIELDS}
+                vals["x"] = f"{10.0 + i:.17g}"
+                vals["y"] = f"{20.0 + i:.17g}"
+                vals["A"] = f"{A[i, j]:.17g}"
+                vals["c"] = f"{c[i, j]:.17g}"
+                vals["hval_Ar"] = str(int(hval[i, j]))
+                vals["isPSF"] = "1"
+                vals["s"] = "1.5"
+                row.extend(vals[f] for f in CME_DETECT_CHANNEL_FIELDS)
+            row.extend(["10", "20", "1", "1", "1"])
+            f.write("\t".join(row) + "\n")
+    return path
+
+
+@pytest.fixture
+def cpp_condition_folder(tmp_path: Path) -> Path:
+    """Same two cells as ``condition_folder``, in cme_detect's TSV layout."""
+    condition = tmp_path / "488nm_3.0pct_580V_561nm_3.2pct_500V"
+    for name, spec in (("cell1", CELL1), ("cell2", CELL2)):
+        write_detection_tsv(
+            condition / name / "ch1" / "Detection" / "detection_cpp.tsv",
+            spec["A"], spec["c"], spec["h"], channels=("ch1", "ch2"),
+        )
+        (condition / name / "ch2").mkdir(parents=True, exist_ok=True)
+    return condition

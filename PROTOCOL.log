@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.5.4)  4 MAY 2026 09:15
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.5.4)  6 SEP 2026 12:14
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -927,75 +927,84 @@ Package microtype Info: Loading generic protrusion settings for font family
 [1
 
 {C:/Users/shivl/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]
-(PROTOCOL.toc)
+(PROTOCOL.toc [2])
 \tf@toc=\write6
 \openout6 = `PROTOCOL.toc'.
 
- [2] [3] [4] [5]
-Underfull \hbox (badness 2762) in paragraph at lines 294--302
+ [3] [4] [5]
+Underfull \hbox (badness 2762) in paragraph at lines 332--340
 []\T1/cmr/bx/n/10.95 Important: DLS data for-mat-ting. \T1/cmr/m/n/10.95 Your E
 x-cel spread-sheet must match the
  []
 
 
-Underfull \hbox (badness 3930) in paragraph at lines 294--302
+Underfull \hbox (badness 3930) in paragraph at lines 332--340
 \T1/cmr/m/n/10.95 lay-out of the ex-am-ple file in the \T1/cmtt/m/n/10.95 test_
 data/ \T1/cmr/m/n/10.95 folder of this repos-i-tory. Open
  []
 
-[6] [7]
+[6] [7] [8]
 LaTeX Font Info:    Font shape `T1/cmtt/bx/n' in size <10.95> not available
-(Font)              Font shape `T1/cmtt/m/n' tried instead on input line 445.
- [8] [9] [10] [11] [12]
-Underfull \hbox (badness 6725) in paragraph at lines 752--752
+(Font)              Font shape `T1/cmtt/m/n' tried instead on input line 524.
+ [9] [10] [11]
+LaTeX Font Info:    Font shape `T1/cmtt/bx/n' in size <12> not available
+(Font)              Font shape `T1/cmtt/m/n' tried instead on input line 697.
+ [12]
+Underfull \hbox (badness 4846) in paragraph at lines 751--756
+\T1/cmr/m/n/10.95 The mas-ter chan-nel folder of ev-ery cell now has a \T1/cmtt
+/m/n/10.95 Detection \T1/cmr/m/n/10.95 sub-folder con-tain-ing
+ []
+
+[13]
+Overfull \hbox (7.78204pt too wide) in paragraph at lines 805--812
+\T1/cmr/m/n/10.95 tion chan-nel each \T1/cmtt/m/n/10.95 ch1\T1/cmr/m/n/10.95 /\
+T1/cmtt/m/n/10.95 ch2 \T1/cmr/m/n/10.95 folder holds, us-ing the \T1/cmtt/m/n/1
+0.95 channel_map.json \T1/cmr/m/n/10.95 writ-ten by \T1/cmtt/m/n/10.95 prepare_
+input.py
+ []
+
+[14] [15] [16]
+Underfull \hbox (badness 1226) in paragraph at lines 1044--1044
+[]|\T1/cmr/m/n/10.95 Channel folder names, comma-separated, in the \T1/cmr/bx/n
+/10.95 ex-act anal-y-sis or-
+ []
+
+
+Underfull \hbox (badness 6725) in paragraph at lines 1044--1044
 []|\T1/cmr/m/n/10.95 Output file-name. Saved in-side the \T1/cmtt/m/n/10.95 --i
 nput \T1/cmr/m/n/10.95 folder. De-fault
  []
 
-[13] [14] [15]
-Overfull \hbox (44.83992pt too wide) in paragraph at lines 942--944
+[17] [18] [19]
+Overfull \hbox (44.83992pt too wide) in paragraph at lines 1236--1238
 \T1/cmr/m/n/10.95 A PNG saved in \T1/cmtt/m/n/10.95 figures/\T1/cmr/m/n/10.95 :
  \T1/cmtt/m/n/10.95 488nm_5.0pct_580V_561nm_3.2pct_500V__protein_density_vs_dia
 meter.png\T1/cmr/m/n/10.95 . 
  []
 
 
-Overfull \hbox (2.12346pt too wide) in paragraph at lines 959--962
+Overfull \hbox (2.12346pt too wide) in paragraph at lines 1253--1256
 []\T1/cmr/m/n/10.95 Bin av-er-ages go-ing \T1/cmr/bx/n/10.95 up \T1/cmr/m/n/10.
 95 to-ward smaller di-am-e-ters $\OMS/cmsy/m/n/10.95 )$ \T1/cmr/m/n/10.95 your 
 pro-tein pref-er-en-tially binds high-curvature
  []
 
-[16]
-LaTeX Font Info:    Font shape `T1/cmtt/bx/n' in size <12> not available
-(Font)              Font shape `T1/cmtt/m/n' tried instead on input line 986.
- [17] [18] [19]
-Overfull \hbox (8.04198pt too wide) in paragraph at lines 1227--1231
-\T1/cmr/m/n/10.95 the cell folder in Finder/Explorer and check whether \T1/cmtt
-/m/n/10.95 ch1/Detection/ \T1/cmr/m/n/10.95 ex-ists with a \T1/cmtt/m/n/10.95 d
-etection_v2.mat
- []
-
-[20] [21] [22] (PROTOCOL.aux)
+[20] [21] [22] [23] [24] [25] [26] (PROTOCOL.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2025-12-24>
  ***********
-
-
-LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
-
 Package rerunfilecheck Info: File `PROTOCOL.out' has not changed.
-(rerunfilecheck)             Checksum: 01653231FBA563DC32996348EA68CB1C;6032.
+(rerunfilecheck)             Checksum: 5805D14ACE24F0B7B1B5D1DAE4EB97F0;6886.
  ) 
 Here is how much of TeX's memory you used:
- 28180 strings out of 467871
- 524929 string characters out of 5418377
- 1165195 words of memory out of 5000000
- 56371 multiletter control sequences out of 15000+600000
+ 28266 strings out of 467871
+ 526311 string characters out of 5418377
+ 1259273 words of memory out of 5000000
+ 56384 multiletter control sequences out of 15000+600000
  645810 words of font info for 82 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 116i,12n,121p,1199b,1992s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 116i,12n,121p,1199b,2166s stack positions out of 10000i,1000n,20000p,200000b,200000s
  <C:\Users\shivl\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ectt
 1200.pk> <C:\Users\shivl\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi60
 0\ectt1000.pk> <C:\Users\shivl\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec
@@ -1017,9 +1026,9 @@ c/amsfonts/cm/cmmi8.pfb><C:/Users/shivl/AppData/Local/Programs/MiKTeX/fonts/typ
 e1/public/amsfonts/cm/cmr10.pfb><C:/Users/shivl/AppData/Local/Programs/MiKTeX/f
 onts/type1/public/amsfonts/cm/cmr8.pfb><C:/Users/shivl/AppData/Local/Programs/M
 iKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb>
-Output written on PROTOCOL.pdf (22 pages, 355376 bytes).
+Output written on PROTOCOL.pdf (26 pages, 388997 bytes).
 PDF statistics:
- 1167 PDF objects out of 1200 (max. 8388607)
- 275 named destinations out of 1000 (max. 500000)
- 11541 words of extra memory for PDF output out of 12000 (max. 10000000)
+ 1291 PDF objects out of 1440 (max. 8388607)
+ 348 named destinations out of 1000 (max. 500000)
+ 11557 words of extra memory for PDF output out of 12000 (max. 10000000)
 

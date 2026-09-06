@@ -1,21 +1,26 @@
 # Single Liposome Curvature Assay Pipeline
 
 A Python pipeline for analyzing protein curvature sensing on liposomes from
-fluorescence microscopy images. Pairs with the
-[CMEanalysis MATLAB detection code](https://github.com/DanuserLab/cmeAnalysis)
-for sub-diffraction-limit spot detection.
+fluorescence microscopy images. Sub-diffraction-limit spot detection uses
+the CMEanalysis detection algorithm (Danuser Lab). The repository ships a
+**native C++ CMEanalysis-compatible detector** (`native_detection/`,
+recommended — no MATLAB required, see
+[Native CMEanalysis-compatible detection](#native-cmeanalysis-compatible-detection-recommended))
+and still supports the original
+[CMEanalysis MATLAB code](https://github.com/DanuserLab/cmeAnalysis) as the
+reference/fallback route.
 
-> **New to this repo?** See [PROTOCOL.md](PROTOCOL.md) for a
+> **New to this repo?** See [PROTOCOL.pdf](PROTOCOL.pdf) for a
 > beginner-friendly step-by-step walkthrough with troubleshooting.
 
 ## For Non-Coders
 
 If you're a wet-lab user running this pipeline for the first time and
 you've never used Python or the command line, start with
-**[PROTOCOL.md](PROTOCOL.md)** — a step-by-step walkthrough with
+**[PROTOCOL.pdf](PROTOCOL.pdf)** — a step-by-step walkthrough with
 Windows/Mac commands side-by-side, placeholder paths, expected outputs,
 and common-error troubleshooting. This README is the terse developer
-reference; PROTOCOL.md is the friendly one.
+reference; PROTOCOL.pdf (built from PROTOCOL.tex) is the friendly one.
 
 ## Getting Started
 
@@ -79,7 +84,26 @@ mkdir data figures
 python plot_curvature.py --help
 ```
 
-### 6. Add your data
+### 6. Build the native detection backend (recommended)
+
+This compiles `cme_detect`, the native spot detector, so that Step 2 of
+the pipeline needs no MATLAB. On Windows install the free
+[Build Tools for Visual Studio 2022](https://visualstudio.microsoft.com/downloads/)
+with the "Desktop development with C++" workload (this includes CMake),
+then:
+
+```powershell
+cd native_detection
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+cd ..
+.\native_detection\build\Release\cme_detect.exe --help
+```
+
+Details, other platforms and troubleshooting: [native_detection/README.md](native_detection/README.md).
+If you cannot build it, the MATLAB route (Step 2, fallback) still works.
+
+### 7. Add your data
 
 Copy your raw TIFFs and DLS `.xlsx` files into the `data/` folder:
 
@@ -113,8 +137,10 @@ The assay works like this:
 
 1. **Image liposomes** — Two-channel fluorescence microscopy: one channel is
    lipid dye, the other is bound protein.
-2. **Detect spots** — MATLAB code (external) fits Gaussians to each
-   sub-diffraction punctum and reports amplitudes.
+2. **Detect spots** — the CMEanalysis detection algorithm fits Gaussians to
+   each sub-diffraction punctum and reports amplitudes. Run it with the
+   native `cme_detect` backend in this repo (recommended) or with the
+   original MATLAB CMEanalysis code (reference/fallback).
 3. **Calibrate sizes** — Dynamic light scattering (DLS) gives the true size
    distribution of the liposome stock. By comparing the mean DLS diameter to
    the mean sqrt(lipid amplitude), you get a conversion factor from
@@ -122,6 +148,142 @@ The assay works like this:
 4. **Compute curvature sorting** — For each punctum, convert lipid amplitude
    to liposome diameter, then compute protein surface density =
    protein_A / (πD²).
+
+## Native CMEanalysis-compatible detection (recommended)
+
+`native_detection/` contains `cme_detect`, a native C++ implementation of
+the specific CMEanalysis detection path this project uses — the
+dependency closure of the default `loadConditionData` + `rng(1)` +
+`runDetection(data)` workflow (data-driven PSF sigma estimation,
+`pointSourceDetection`, the `fitGaussian2D` MEX fitting, master/slave
+channel fitting and the `frameInfo`/mask outputs). It is **not** a port of
+all of CMEanalysis (no tracking, lifetime analysis, GUI or 3-D).
+
+* It was **regression-validated against the original MATLAB CMEanalysis
+  implementation**. On the tested data sets it reproduced the detection
+  and filter decisions: identical detection counts and row order, identical
+  `hval_Ar`/`hval_AD`/`isPSF` and mask decisions, master-channel positions
+  and amplitudes within numerical tolerance, and the downstream SLiC filter
+  kept exactly the same puncta (45,362 of 48,325 on a 10-cell reference
+  set; 9,960 of 25,395 on a second, practical SLiC data set). The only
+  differences are negligible floating-point deviations in a small number
+  of numerically unstable fits. This is not a claim of bit-for-bit
+  equivalence; see
+  [native_detection/README.md](native_detection/README.md) and
+  [PORTING_NOTES.md](native_detection/PORTING_NOTES.md) for the exact
+  numbers.
+* It is **substantially faster** and avoids the MATLAB / Parallel
+  Computing Toolbox dependency. Runtime depends on image count, CPU and
+  thread count; measured examples: the 10-cell reference benchmark took
+  1903 s in MATLAB versus 366 s natively with 12 threads, and a practical
+  SLiC condition ran in roughly 25 s natively versus several minutes with
+  the prior MATLAB workflow.
+* The original MATLAB workflow remains available as the reference
+  implementation (Step 2, fallback, below).
+
+Native pipeline:
+
+```text
+raw microscopy TIFFs
+        ↓
+prepare_input.py            (split channels, write channel_map.json)
+        ↓
+cme_detect.exe              (native_detection/, --channels <master first> --master <master>)
+        ↓
+analyze_cpp.py              (same filter as analyze_matlab.py)
+        ↓
+filtered_puncta_A_values.txt
+        ↓
+rest of SLiC analysis       (dls_calibration.py, plot_curvature.py, ...)
+```
+
+### Build (Windows, Visual Studio 2022)
+
+```powershell
+cd "<repo>\native_detection"
+
+cmake -S . -B build `
+  -G "Visual Studio 17 2022" `
+  -A x64
+
+cmake --build build --config Release
+```
+
+The executable is produced at `native_detection\build\Release\cme_detect.exe`
+(with `gsl.dll` / `gslcblas.dll` copied next to it). The vendored
+dependencies in `native_detection/third_party/` (GSL 2.8, libtiff 4.7.0,
+GSL 1.16 Levenberg–Marquardt sources) are all that is needed on Windows;
+other platforms use `-DCME_USE_SYSTEM_LIBS=ON`. `build/` is gitignored.
+
+### Run
+
+```powershell
+& ".\native_detection\build\Release\cme_detect.exe" `
+    --input "C:\path\to\prepared_condition" `
+    --channels ch1,ch2 `
+    --master ch1 `
+    --seed 1 `
+    --threads 12
+```
+
+```text
+cme_detect --input <condition dir> --channels ch1,ch2[,...] --master ch1 [options]
+
+  --input DIR          condition directory (contains the cell*/ movie folders)
+  --channels a,b,...   channel folder names in the EXACT order loadConditionData received them
+  --master NAME        must equal the first entry of --channels (master/source channel)
+  --markers a,b,...    optional fluorophore names (metadata only; do not affect detection)
+  --seed N             rng(N) seed used by the PSF sigma estimation (default 1)
+  --sigma s1,s2,...    skip data-driven sigma estimation and use these values (runDetection 'Sigma')
+  --output DIR         directory for detections_all.tsv / summary.tsv / sigma.tsv (default: <input>/cme_detect_output)
+  --dump-dir DIR       write all intermediates for regression testing
+  --no-masks           do not write Detection/dmasks.tif
+  --no-matlab-layout   do not write Detection/detection_cpp.tsv under the master channel
+  --movie-selector S   loadConditionData 'MovieSelector' (default 'cell')
+  --threads N          OpenMP threads for frame-level parallelism (default 1)
+```
+
+* `--channels` is the exact analysis order; the **first entry is the
+  master/source channel** and `--master` must equal it. The tool refuses
+  any other arrangement rather than reordering silently. Folder names
+  carry no master/slave meaning: `--channels ch2,ch1 --master ch2` is just
+  as valid when `ch2` holds the lipid channel (check `channel_map.json`).
+* `--seed 1` is the reproducible equivalent of the `rng(1)` used in the
+  MATLAB workflow for the data-derived sigma estimation.
+* `--threads` can be set to the number of cores available; results do not
+  depend on it (output was byte-identical across thread counts).
+* Output goes to `<input>\cme_detect_output` unless `--output` is given;
+  in addition `<cell>\<master>\Detection\detection_cpp.tsv` is written in
+  the MATLAB layout, which is what `analyze_cpp.py` reads.
+
+Then filter and export, exactly as `analyze_matlab.py` would:
+
+```powershell
+python analyze_cpp.py `
+    --input "C:\path\to\prepared_condition" `
+    --channels ch1,ch2 `
+    --lipid-channel ch1
+```
+
+`analyze_cpp.py` takes the same flags as `analyze_matlab.py` (`--k-std`,
+`--hval-filter`, `--output-name`, `--raw-output-name`), imports the filter
+and table writers from it, and writes the same
+`filtered_puncta_A_values.txt` / `raw_puncta_values.txt` files, so every
+downstream script works unchanged. It also checks that `--channels`
+matches the order recorded in the `cme_detect` output.
+
+### Complete native workflow
+
+1. **Prepare microscope TIFFs** — `python prepare_input.py --input ... --output ... --crop 1`
+   (Step 1 below). Read the `channel_map.json` it writes.
+2. **Identify the master channel** from `channel_map.json` and the
+   recorded wavelength/voltage/dye metadata. The lipid channel is the
+   master; it is *not* necessarily `ch1`.
+3. **Run native detection** — `cme_detect.exe --input <condition> --channels <master>,<slave> --master <master> --seed 1 --threads N`.
+4. **Filter/export detections** — `python analyze_cpp.py --input <condition> --channels <master>,<slave> --lipid-channel <master>`.
+5. **Continue the SLiC analysis** — `dls_calibration.py`, `plot_curvature.py`,
+   `plot_histograms.py`, … as in Step 4 onwards below, on
+   `filtered_puncta_A_values.txt`.
 
 ## Pipeline
 
@@ -131,15 +293,17 @@ Raw TIFFs                ┌─────────────────�
                          └────────┬────────────┘  crop, organize by voltage
                                   │
                                   ▼
-                         ┌─────────────────────┐
-                         │ 2. MATLAB detection  │  External: CMEanalysis
-                         │    (not in this repo)│  (see PROTOCOL.md)
-                         └────────┬────────────┘
+             ┌────────────────────┴───────────────────────┐
+             │ 2. spot detection (CMEanalysis algorithm)  │
+             │  recommended: cme_detect (native_detection/)│
+             │  fallback:    MATLAB CMEanalysis (external) │
+             └────────────────────┬───────────────────────┘
                                   │
                                   ▼
-                         ┌─────────────────────┐
-                         │ 3. analyze_matlab.py │  Read detection_v2.mat,
-                         └────────┬────────────┘  filter puncta, export A vals
+             ┌────────────────────┴───────────────────────┐
+             │ 3. analyze_cpp.py    (detection_cpp.tsv)   │  filter puncta,
+             │    analyze_matlab.py (detection_v2.mat)    │  export A values
+             └────────────────────┬───────────────────────┘
                                   │
                          ┌────────┴────────────────────┐
                          │                             │
@@ -161,10 +325,17 @@ liposome-curvature-assay/
 │   └── experiment_name/
 │       └── 488nm_.../          ← created by prepare_input.py
 │           ├── cell1/ch1/ ...
+│           ├── cme_detect_output/  ← written by cme_detect
 │           └── filtered_puncta_A_values.txt
 ├── figures/                    ← plots saved here (gitignored)
+├── native_detection/           ← native C++ CMEanalysis-compatible detector
+│   ├── CMakeLists.txt, src/, include/, tests/, third_party/
+│   ├── README.md, PORTING_NOTES.md, THIRD_PARTY_NOTICES.md, LICENSE
+│   └── build/                  ← created by cmake (gitignored)
+├── tests/                      ← pytest suite
 ├── prepare_input.py
-├── analyze_matlab.py
+├── analyze_cpp.py              ← filter cme_detect output (native route)
+├── analyze_matlab.py           ← filter MATLAB output (reference route)
 ├── dls_calibration.py
 ├── plot_curvature.py
 ├── plot_histograms.py
@@ -294,8 +465,9 @@ pixels in both slots. The manifest stays truthful — both slots record
 > satisfy tooling that expects two channel folders). It must NOT be used
 > when the second detector channel contains scientifically meaningful
 > independent data — in that case keep the real slave-channel image and
-> use `analyze_matlab.py`'s default `--hval-filter master` instead (see
-> Step 3). A stderr warning is printed on every duplicated run.
+> use the default `--hval-filter master` of `analyze_cpp.py` /
+> `analyze_matlab.py` instead (see Step 3). A stderr warning is printed on
+> every duplicated run.
 
 If `--frames` forces a rule-excluded channel (e.g. the DIC page) into a
 slot, that is allowed but recorded as `excluded_by_rule` on the slot and
@@ -306,7 +478,10 @@ warned about on stderr.
 > `data/olivia_data` acquisition `ch1` is 488/EGFP (protein) and `ch2` is
 > 561/Texas Red (lipid) — the opposite of the `--lipid-col A_ch1` /
 > `--protein-col A_ch2` defaults used downstream. Check
-> `channel_map.json` and set those flags accordingly.
+> `channel_map.json` and set those flags accordingly. Whichever folder
+> holds the lipid channel is the one to put **first** in `cme_detect
+> --channels` (and name in `--master`), or to select **first** (as master)
+> in MATLAB `loadConditionData` — see Step 2.
 
 ```bash
 python prepare_input.py \
@@ -335,17 +510,107 @@ before anything is written:
 | `--crop`    | Center crop divisor. `1` = no crop, `2` = center quarter |
 | `--dry-run` | Parse metadata and print what would be created, without writing files |
 
-### Step 2: MATLAB detection (external)
+### Step 2: Spot detection
 
-See [PROTOCOL.md](PROTOCOL.md) for detailed CMEanalysis instructions. The detection
-produces `detection_v2.mat` files inside the master channel's `Detection/`
-subdirectory. Only the lipid/master channel (ch1) gets this folder.
+Both routes run the same CMEanalysis detection algorithm; which physical
+channel is the master/source channel is decided by you, from the metadata,
+and is **not** necessarily `ch1`:
 
-### Step 3: Analyze MATLAB output
+1. Check `channel_map.json` (and the recorded wavelength/voltage
+   metadata) to see which physical acquisition channel each `ch1`/`ch2`
+   folder holds.
+2. Decide which physical channel is your lipid/**master** channel. Either
+   folder may be the master.
 
-Filter puncta by intensity threshold and export amplitudes.
+#### Step 2, recommended: native `cme_detect`
+
+Build once (Getting Started, step 6), then run with the master channel
+first in `--channels` and named in `--master`:
+
+```powershell
+# ch1 holds the lipid (master) channel
+& ".\native_detection\build\Release\cme_detect.exe" `
+    --input "data\march_3_experiment_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V" `
+    --channels ch1,ch2 --master ch1 --seed 1 --threads 12
+
+# ch2 holds the lipid (master) channel
+& ".\native_detection\build\Release\cme_detect.exe" `
+    --input "data\march_3_experiment_matlab\488nm_5.0pct_580V_561nm_3.2pct_500V" `
+    --channels ch2,ch1 --master ch2 --seed 1 --threads 12
+```
+
+The run writes `<cell>/<master>/Detection/detection_cpp.tsv` for every
+cell (only the master channel gets a `Detection/` folder) plus
+`<condition>/cme_detect_output/`. Record the `--channels` order — Step 3
+needs it verbatim. Full CLI, outputs and validation: see
+[Native CMEanalysis-compatible detection](#native-cmeanalysis-compatible-detection-recommended)
+and [native_detection/README.md](native_detection/README.md).
+
+#### Step 2, reference/fallback: original MATLAB CMEanalysis workflow
+
+See [PROTOCOL.pdf](PROTOCOL.pdf) for detailed CMEanalysis instructions. The
+channel-selection order in MATLAB is load-bearing — it determines which
+physical channel is the master/source channel and the column order of
+everything CMEanalysis writes, and `analyze_matlab.py` must be given the
+same order later:
+
+3. In MATLAB `loadConditionData`, select the master channel **first**,
+   then the slave channel(s).
+4. For reproducibility, seed the RNG immediately before detection:
+
+   ```matlab
+   data = loadConditionData;
+   rng(1);
+   runDetection(data);
+   ```
+
+   The seed makes CMEanalysis's data-derived PSF sigma estimation
+   reproducible; without it, repeated runs can yield slightly different
+   sigma estimates, which propagate into the fitted amplitudes.
+5. Record the selection order — Step 3 needs it verbatim.
+
+The detection produces `detection_v2.mat` files inside the master
+channel's `Detection/` subdirectory. Only the lipid/master channel (the
+one selected **first**) gets this folder.
+
+### Step 3: Analyze detection output
+
+Filter puncta by intensity threshold and export amplitudes. Use the script
+matching the Step 2 route — both apply the identical filter (the same
+shared code) and write identical output files:
+
+| Step 2 route | Script | Reads |
+|---|---|---|
+| native `cme_detect` (recommended) | `analyze_cpp.py` | `cell*/<master>/Detection/detection_cpp.tsv` |
+| MATLAB CMEanalysis (fallback) | `analyze_matlab.py` | `cell*/<master>/Detection/detection_v2.mat` |
+
+`--channels` means the **exact analysis order** — the list given to
+`cme_detect --channels`, or the order the channels were selected in MATLAB
+`loadConditionData` (the order stored in `frameInfo`) — *not*
+numerical/sorted folder order. The first entry is the master/source
+channel, so `--lipid-channel` must equal the first entry of `--channels`;
+any other order is rejected with an error rather than silently
+reinterpreted, because a mismatch would attach detection columns to the
+wrong physical channel. `analyze_cpp.py` additionally compares
+`--channels` with the order recorded in the TSV header and stops on a
+mismatch.
 
 ```bash
+# Native route: cme_detect was run with --channels ch1,ch2 --master ch1
+python analyze_cpp.py \
+    --input  data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V \
+    --channels ch1,ch2 \
+    --lipid-channel ch1
+
+# Native route: cme_detect was run with --channels ch2,ch1 --master ch2
+python analyze_cpp.py \
+    --input  data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V \
+    --channels ch2,ch1 \
+    --lipid-channel ch2
+```
+
+```bash
+# Example A: MATLAB selected ch1 first (master), ch2 second (slave)
 python analyze_matlab.py \
     --input  data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V \
     --channels ch1,ch2 \
@@ -354,15 +619,26 @@ python analyze_matlab.py \
     --output-name filtered_puncta_A_values.txt
 ```
 
+```bash
+# Example B: MATLAB selected ch2 first (master), ch1 second (slave)
+python analyze_matlab.py \
+    --input  data/march_3_experiment_matlab/488nm_5.0pct_580V_561nm_3.2pct_500V \
+    --channels ch2,ch1 \
+    --lipid-channel ch2
+```
+
+Both scripts take the same arguments:
+
 | Argument          | Meaning |
 |-------------------|---------|
 | `--input`         | Condition folder (voltage group from Step 1) |
-| `--channels`      | Channel names matching folder names. Use `ch1` for lipid-only |
-| `--lipid-channel` | Which channel is lipid (used for thresholding) |
+| `--channels`      | Comma-separated channel folder names in the exact analysis order: as given to `cme_detect --channels`, or as selected in MATLAB `loadConditionData` / stored in `frameInfo`. The first entry is the master/source channel. Use a single name for lipid-only |
+| `--lipid-channel` | The lipid/master channel (used for thresholding). Must equal the **first** entry of `--channels` |
 | `--k-std`         | Threshold: keep if A > mean(c) + k·std(c). Default `2.0` |
 | `--hval-filter`   | How the `hval_Ar` hypothesis test is used: `master` (default, require hval == 1 in the lipid/master channel only), `none` (hval not used for filtering), `all` (require hval == 1 in every requested channel) |
 | `--output-name`   | Filtered output filename, saved inside `--input` folder |
 | `--raw-output-name` | Unfiltered diagnostic filename (default: `raw_puncta_values.txt`) |
+| `--detection-file` | `analyze_cpp.py` only: per-cell table name under `Detection/` (default `detection_cpp.tsv`; regression use: `detection_matlab.tsv`) |
 
 #### hval filtering
 
@@ -390,12 +666,13 @@ python analyze_matlab.py --input data/... --channels ch1,ch2 \
 ```
 
 The header comments of both output files state exactly which hval policy
-was used.
+was used. (`analyze_cpp.py` accepts `--hval-filter` identically.)
 
 #### Raw diagnostic output
 
-Every run also writes `raw_puncta_values.txt` into the condition folder —
-**every** punctum/candidate present in the loaded `frameInfo` arrays,
+Every run (of either script) also writes `raw_puncta_values.txt` into the
+condition folder — **every** punctum/candidate present in the detection
+tables,
 with `A`, `c` and `hval` for each channel and no Python-side filtering
 whatsoever (no amplitude threshold, no hval filter; negative/zero A
 values are retained). Columns for two channels:
@@ -615,8 +892,10 @@ python plot_dls_comparison.py \
 
 | File                      | Purpose |
 |---------------------------|---------|
-| `prepare_input.py`        | Split and reorder TIFF channels, organize for MATLAB |
-| `analyze_matlab.py`       | Read MATLAB detection `.mat` files, filter puncta, export TSV |
+| `prepare_input.py`        | Split and reorder TIFF channels, organize into the condition/cell/channel layout used by `cme_detect` and MATLAB |
+| `native_detection/`       | Native C++ CMEanalysis-compatible detector `cme_detect` (recommended); own README, porting notes, tests, third-party notices |
+| `analyze_cpp.py`          | Read `cme_detect` per-cell `detection_cpp.tsv` files, filter puncta (shared code with `analyze_matlab.py`), export TSV |
+| `analyze_matlab.py`       | Read MATLAB detection `.mat` files, filter puncta, export TSV (reference/fallback route) |
 | `dls_calibration.py`      | DLS-fluorescence distribution overlay to compute conversion factor |
 | `plot_curvature.py`       | Convert amplitudes to diameters, plot protein density vs diameter |
 | `plot_histograms.py`      | Plot amplitude histograms and estimated diameter distributions |
@@ -625,15 +904,43 @@ python plot_dls_comparison.py \
 | `plot_dls_comparison.py`  | Side-by-side DLS vs fluorescence sqrt(A) per channel |
 | `requirements.txt`        | Python dependencies: numpy, matplotlib, tifffile, h5py, openpyxl, pandas, scipy |
 
+## Tests
+
+Python (creates nothing outside `tmp`; the `cme_detect` end-to-end tests
+are skipped automatically when the native backend is not built):
+
+```powershell
+pytest tests/test_analyze_matlab.py tests/test_analyze_cpp.py tests/test_prepare_channels.py
+```
+
+Native C++ unit/regression tests (266 checks against MATLAB/MEX reference
+values), from a configured build:
+
+```powershell
+ctest --test-dir native_detection/build -C Release --output-on-failure
+```
+
 ## Notes
 
-- **MATLAB detection** is maintained separately
-  ([DanuserLab/cmeAnalysis](https://github.com/DanuserLab/cmeAnalysis)).
-  This pipeline reads its output: `detection_v2.mat` files containing a
-  `frameInfo` struct with fields `A` (amplitude), `c` (background), and
-  `hval_Ar` (hypothesis test).
-- **Only the master/lipid channel** (ch1) gets a `Detection/` subfolder from
-  CMEanalysis. The protein channel (ch2) will just contain the TIFF.
+- **Detection** uses the CMEanalysis algorithm
+  ([DanuserLab/cmeAnalysis](https://github.com/DanuserLab/cmeAnalysis)),
+  either through the native `cme_detect` port in `native_detection/`
+  (recommended; writes `detection_cpp.tsv`) or through MATLAB
+  (reference/fallback; writes `detection_v2.mat` with a `frameInfo` struct).
+  In both cases the fields used downstream are `A` (amplitude), `c`
+  (background), and `hval_Ar` (hypothesis test). The native port covers
+  the default `loadConditionData` + `runDetection` path only, not the
+  whole CMEanalysis package.
+- **Only the master/lipid channel** — the channel passed *first* to
+  `cme_detect --channels` (and named in `--master`), or selected *first*
+  in MATLAB `loadConditionData`, which need not be `ch1` — gets a
+  `Detection/` subfolder. Slave channel folders just contain the TIFF.
+- **Licensing of `native_detection/`:** the native port re-implements
+  GPL-3.0 algorithms from cmeAnalysis and links against GSL, so that
+  subtree is GPL-3.0 (`native_detection/LICENSE`); attributions and the
+  licences of the vendored GSL / libtiff builds are collected in
+  `native_detection/THIRD_PARTY_NOTICES.md`. The rest of the repository
+  carries no licence file at present.
 - **DLS data preparation:** Export the size distribution from the Malvern
   Zetasizer software. The spreadsheet must include the number distribution.
   Copy it into an Excel file with the standard Zetasizer section headers
@@ -644,8 +951,8 @@ python plot_dls_comparison.py \
   distributions. This is the standard SLiC calibration procedure used from
   Kunding 2008 through Johnson/Zeno 2025. The ratio-of-means is also
   reported as a sanity check. See `DLS_Calibration_Notes.md` for background.
-- **Lipid-only experiments** are fully supported. Run `analyze_matlab.py`
-  with `--channels ch1 --lipid-channel ch1`, then use `plot_histograms.py`
+- **Lipid-only experiments** are fully supported. Run `analyze_cpp.py` (or
+  `analyze_matlab.py`) with `--channels ch1 --lipid-channel ch1`, then use `plot_histograms.py`
   (skip `plot_curvature.py` since it requires protein data).
 - The `data/` and `figures/` folders are gitignored. Your microscopy data
   stays local.

@@ -4,3 +4,31 @@ __pycache__/
 data/
 figures/
 plots/
+
+# ── Native C++ detection backend (native_detection/) ──────────────────
+# Only build products are ignored. The sources, CMakeLists.txt, tests,
+# reference data and the vendored third_party/ libraries are tracked.
+native_detection/build/
+native_detection/build-*/
+native_detection/out/
+native_detection/.vs/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.exp
+x64/
+Debug/
+Release/
+# cme_detect run outputs and regression dumps live next to the data
+cme_detect_output/
+cme_dump*/
+.pytest_cache/

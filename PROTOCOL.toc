@@ -3,31 +3,33 @@
 \contentsline {section}{\numberline {3}Prerequisites}{5}{section.3}%
 \contentsline {subsection}{\numberline {3.1}Python}{5}{subsection.3.1}%
 \contentsline {subsection}{\numberline {3.2}uv (Package Manager)}{5}{subsection.3.2}%
-\contentsline {subsection}{\numberline {3.3}MATLAB and CMEanalysis}{5}{subsection.3.3}%
-\contentsline {subsection}{\numberline {3.4}DLS data}{6}{subsection.3.4}%
-\contentsline {section}{\numberline {4}Download the Code and Set Up}{6}{section.4}%
-\contentsline {subsection}{\numberline {4.1}Get the repository}{6}{subsection.4.1}%
+\contentsline {subsection}{\numberline {3.3}Visual Studio Build Tools (for the native detection backend)}{5}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}MATLAB and CMEanalysis (reference/fallback only)}{6}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}DLS data}{7}{subsection.3.5}%
+\contentsline {section}{\numberline {4}Download the Code and Set Up}{7}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Get the repository}{7}{subsection.4.1}%
 \contentsline {subsection}{\numberline {4.2}Open a terminal in the repo folder}{7}{subsection.4.2}%
-\contentsline {subsection}{\numberline {4.3}Create a virtual environment}{7}{subsection.4.3}%
-\contentsline {subsection}{\numberline {4.4}Activate the virtual environment}{7}{subsection.4.4}%
-\contentsline {subsection}{\numberline {4.5}Install the Python packages}{7}{subsection.4.5}%
+\contentsline {subsection}{\numberline {4.3}Create a virtual environment}{8}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Activate the virtual environment}{8}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Install the Python packages}{8}{subsection.4.5}%
 \contentsline {subsection}{\numberline {4.6}Verify everything works}{8}{subsection.4.6}%
-\contentsline {section}{\numberline {5}Folder Structure: Where to Put Your Files}{8}{section.5}%
-\contentsline {section}{\numberline {6}Step 1: Prepare Images}{9}{section.6}%
-\contentsline {section}{\numberline {7}Step 2: Run MATLAB Detection}{10}{section.7}%
-\contentsline {section}{\numberline {8}Step 3: Analyze MATLAB Output}{12}{section.8}%
-\contentsline {section}{\numberline {9}Step 4: DLS Calibration}{13}{section.9}%
-\contentsline {section}{\numberline {10}Step 5: Plot Curvature Sorting}{15}{section.10}%
-\contentsline {section}{\numberline {11}Step 6 (Optional): Plot Histograms}{16}{section.11}%
-\contentsline {section}{\numberline {12}Step 7 (Optional): Normalized Overlay Across Experiments}{17}{section.12}%
-\contentsline {section}{\numberline {13}Step 8 (Optional): DLS Distribution Plot}{18}{section.13}%
-\contentsline {section}{\numberline {14}Step 9 (Optional): DLS vs Fluorescence Comparison}{18}{section.14}%
-\contentsline {section}{\numberline {15}Quick Reference: Every-Time Checklist}{19}{section.15}%
-\contentsline {section}{\numberline {16}Troubleshooting}{19}{section.16}%
-\contentsline {subsection}{\numberline {16.1}Setup errors}{19}{subsection.16.1}%
-\contentsline {subsection}{\numberline {16.2}File and path errors}{20}{subsection.16.2}%
-\contentsline {subsection}{\numberline {16.3}Pipeline-stage errors}{20}{subsection.16.3}%
-\contentsline {subsection}{\numberline {16.4}Plot quality issues}{21}{subsection.16.4}%
-\contentsline {subsection}{\numberline {16.5}General}{21}{subsection.16.5}%
-\contentsline {section}{\numberline {17}Common Pitfalls}{21}{section.17}%
-\contentsline {section}{\numberline {18}Further Reading}{21}{section.18}%
+\contentsline {subsection}{\numberline {4.7}Build the native detection backend (recommended)}{8}{subsection.4.7}%
+\contentsline {section}{\numberline {5}Folder Structure: Where to Put Your Files}{9}{section.5}%
+\contentsline {section}{\numberline {6}Step 1: Prepare Images}{10}{section.6}%
+\contentsline {section}{\numberline {7}Step 2: Run Spot Detection}{12}{section.7}%
+\contentsline {section}{\numberline {8}Step 3: Analyze Detection Output}{15}{section.8}%
+\contentsline {section}{\numberline {9}Step 4: DLS Calibration}{17}{section.9}%
+\contentsline {section}{\numberline {10}Step 5: Plot Curvature Sorting}{19}{section.10}%
+\contentsline {section}{\numberline {11}Step 6 (Optional): Plot Histograms}{20}{section.11}%
+\contentsline {section}{\numberline {12}Step 7 (Optional): Normalized Overlay Across Experiments}{21}{section.12}%
+\contentsline {section}{\numberline {13}Step 8 (Optional): DLS Distribution Plot}{22}{section.13}%
+\contentsline {section}{\numberline {14}Step 9 (Optional): DLS vs Fluorescence Comparison}{22}{section.14}%
+\contentsline {section}{\numberline {15}Quick Reference: Every-Time Checklist}{23}{section.15}%
+\contentsline {section}{\numberline {16}Troubleshooting}{23}{section.16}%
+\contentsline {subsection}{\numberline {16.1}Setup errors}{23}{subsection.16.1}%
+\contentsline {subsection}{\numberline {16.2}File and path errors}{24}{subsection.16.2}%
+\contentsline {subsection}{\numberline {16.3}Pipeline-stage errors}{24}{subsection.16.3}%
+\contentsline {subsection}{\numberline {16.4}Plot quality issues}{25}{subsection.16.4}%
+\contentsline {subsection}{\numberline {16.5}General}{25}{subsection.16.5}%
+\contentsline {section}{\numberline {17}Common Pitfalls}{25}{section.17}%
+\contentsline {section}{\numberline {18}Further Reading}{26}{section.18}%
