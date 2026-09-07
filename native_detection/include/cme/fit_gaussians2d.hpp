@@ -34,6 +34,7 @@ struct FitGaussiansOptions {
     const ImageU8* mask = nullptr;  // optional logical mask (bwlabel is applied)
     std::optional<int> confRadius;  // default ceil(2*sigma_max)
     std::optional<int> windowSize;  // default ceil(4*sigma_max)
+    int threads = 1;                // > 1: fit candidates in parallel (each candidate is independent; results by index)
 };
 
 // x, y : initial (or fixed) positions, 1-based MATLAB coordinates

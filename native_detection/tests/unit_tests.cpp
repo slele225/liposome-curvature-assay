@@ -247,6 +247,57 @@ int main(int argc, char** argv) {
 
         cme::PSDDebug dbg;
         cme::PSDResult r = cme::pointSourceDetection(img, 1.5, cme::PSDOptions(), &dbg);
+        // prefilter screening: the mask must equal the exact per-pixel decision
+        {
+            long bad = 0;
+            for (std::size_t i = 0; i < dbg.maskPrefilter.size(); ++i)
+                if ((dbg.maskPrefilter[i] != 0) != (dbg.pvalPrefilter[i] < 0.05)) ++bad;
+            check_eq("prefilter screening == exact (img)", bad, 0);
+        }
+        // thread count must not change any result (columns / candidates are independent)
+        {
+            cme::PSDOptions o4; o4.threads = 4;
+            cme::PSDDebug dbg4;
+            cme::PSDResult r4 = cme::pointSourceDetection(img, 1.5, o4, &dbg4);
+            check_eq("psd threads n", static_cast<long>(r4.pstruct.size()), static_cast<long>(r.pstruct.size()));
+            check_vec("psd threads x", r4.pstruct.x, r.pstruct.x, 0, 0); check_vec("psd threads A", r4.pstruct.A, r.pstruct.A, 0, 0);
+            check_vec("psd threads c", r4.pstruct.c, r.pstruct.c, 0, 0); check_vec("psd threads RSS", r4.pstruct.RSS, r.pstruct.RSS, 0, 0);
+            check_vec("psd threads LoG", dbg4.imgLoG.vec(), dbg.imgLoG.vec(), 0, 0);
+            long md = 0; for (std::size_t i = 0; i < r.mask.size(); ++i) md += (r4.mask[i] != r.mask[i]);
+            check_eq("psd threads mask", md, 0);
+        }
+        // larger synthetic image with many spots near the decision boundary
+        {
+            const std::size_t N = 160;
+            cme::ImageD big(N, N);
+            for (std::size_t y = 0; y < N; ++y) for (std::size_t x = 0; x < N; ++x)
+                big(y, x) = 200.0 + 3.0 * std::sin(0.37 * static_cast<double>(x * y + 7 * x)) + 2.0 * std::cos(1.3 * static_cast<double>(y));
+            for (int k = 0; k < 120; ++k) {
+                const double cx = 10 + (k * 37) % 140 + 0.3 * (k % 3), cy = 10 + (k * 53) % 140 + 0.25 * (k % 4);
+                const double amp = 1.0 + 0.4 * (k % 25);   // from far below to well above the threshold
+                for (int dy = -6; dy <= 6; ++dy) for (int dx = -6; dx <= 6; ++dx) {
+                    const long xx = static_cast<long>(std::round(cx)) + dx, yy = static_cast<long>(std::round(cy)) + dy;
+                    if (xx < 0 || yy < 0 || xx >= static_cast<long>(N) || yy >= static_cast<long>(N)) continue;
+                    const double X = xx - cx, Y = yy - cy;
+                    big(static_cast<std::size_t>(yy), static_cast<std::size_t>(xx)) += amp * std::exp(-(X * X + Y * Y) / (2 * 1.5 * 1.5));
+                }
+            }
+            cme::PSDDebug dbgB;
+            cme::PSDOptions oB; oB.threads = 3;
+            cme::PSDResult rB = cme::pointSourceDetection(big, 1.5, oB, &dbgB);
+            long bad = 0, ones = 0;
+            for (std::size_t i = 0; i < dbgB.maskPrefilter.size(); ++i) {
+                if ((dbgB.maskPrefilter[i] != 0) != (dbgB.pvalPrefilter[i] < 0.05)) ++bad;
+                ones += dbgB.maskPrefilter[i] != 0;
+            }
+            check_eq("prefilter screening == exact (synthetic)", bad, 0);
+            std::printf("  prefilter synthetic: %ld/%zu mask pixels set, %zu detections\n", ones, dbgB.maskPrefilter.size(), rB.pstruct.size());
+            cme::PSDOptions o1; o1.threads = 1;
+            cme::PSDResult r1 = cme::pointSourceDetection(big, 1.5, o1);
+            check_eq("psd threads n (synthetic)", static_cast<long>(r1.pstruct.size()), static_cast<long>(rB.pstruct.size()));
+            check_vec("psd threads A (synthetic)", r1.pstruct.A, rB.pstruct.A, 0, 0);
+            check_vec("psd threads pval (synthetic)", r1.pstruct.pval_Ar, rB.pstruct.pval_Ar, 0, 0);
+        }
         check_eq("psd n", static_cast<long>(r.pstruct.size()), static_cast<long>(R.get("psd n")[0]));
         check_vec("psd x", r.pstruct.x, R.get("psd x")); check_vec("psd y", r.pstruct.y, R.get("psd y"));
         check_vec("psd A", r.pstruct.A, R.get("psd A")); check_vec("psd c", r.pstruct.c, R.get("psd c"));

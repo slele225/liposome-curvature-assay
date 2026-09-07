@@ -70,7 +70,8 @@ add_library(cme_core STATIC
   src/condition_data.cpp
   src/run_detection.cpp
   src/dump.cpp
-  src/output.cpp)
+  src/output.cpp
+  src/profile.cpp)
 target_include_directories(cme_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(cme_core PUBLIC ${CME_DEP_LIBS} gsl116_lm)
 target_compile_definitions(cme_core PUBLIC _USE_MATH_DEFINES NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
@@ -87,6 +88,23 @@ if(CME_USE_OPENMP)
   endif()
 endif()
 
+# Optional code-generation experiments (MSVC).  Any change here must be
+# re-verified for bit-identical output (tests/fit_bench results file and the
+# regression data sets) before it is enabled by default.
+option(CME_LTCG "Whole-program optimisation (/GL + /LTCG) for the native targets" OFF)
+option(CME_AVX2 "Compile the numerical code with /arch:AVX2" OFF)
+option(CME_NO_GS "Disable /GS buffer-security checks in the numerical code" OFF)
+if(MSVC)
+  if(CME_AVX2)
+    target_compile_options(cme_core PUBLIC /arch:AVX2)
+    target_compile_options(gsl116_lm PRIVATE /arch:AVX2)
+  endif()
+  if(CME_NO_GS)
+    target_compile_options(cme_core PUBLIC /GS-)
+    target_compile_options(gsl116_lm PRIVATE /GS-)
+  endif()
+endif()
+
 add_executable(cme_detect src/main.cpp)
 target_link_libraries(cme_detect PRIVATE cme_core)
 
@@ -99,8 +117,17 @@ target_link_libraries(fit_probe PRIVATE cme_core)
 add_executable(profile_sigma tests/profile_sigma.cpp)
 target_link_libraries(profile_sigma PRIVATE cme_core)
 
+add_executable(fit_bench tests/fit_bench.cpp)
+target_link_libraries(fit_bench PRIVATE cme_core)
+
+if(CME_LTCG)
+  foreach(t gsl116_lm cme_core cme_detect cme_tests fit_probe profile_sigma fit_bench)
+    set_property(TARGET ${t} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endforeach()
+endif()
+
 if(CME_VENDORED_GSL)
-  foreach(t cme_detect cme_tests fit_probe profile_sigma)
+  foreach(t cme_detect cme_tests fit_probe profile_sigma fit_bench)
     add_custom_command(TARGET ${t} POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TP}/gsl/bin/gsl.dll ${TP}/gsl/bin/gslcblas.dll $<TARGET_FILE_DIR:${t}>)
   endforeach()

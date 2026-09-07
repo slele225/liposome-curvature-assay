@@ -2,6 +2,7 @@
 #include "cme/conv.hpp"
 #include "cme/morphology.hpp"
 #include "cme/stats.hpp"
+#include "cme/profile.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -11,6 +12,18 @@ namespace cme {
 
 namespace {
 constexpr double PI = 3.14159265358979323846;
+
+// x such that tcdf(x, df) = 0.05, refined by bisection on the same tcdf
+// implementation the mask decision uses (so the screening bounds are
+// consistent with it to the last bit).
+double tinv05(double df) {
+    double lo = -10.0, hi = 0.0;   // tcdf(-10, df >= 1) < 0.05 < tcdf(0, df) = 0.5
+    for (int it = 0; it < 200 && hi - lo > 1e-12; ++it) {
+        const double mid = 0.5 * (lo + hi);
+        if (tcdf(mid, df) < 0.05) lo = mid; else hi = mid;
+    }
+    return 0.5 * (lo + hi);
+}
 }
 
 PSDResult pointSourceDetection(const ImageD& img, double sigma, const PSDOptions& opt, PSDDebug* dbg) {
@@ -27,20 +40,29 @@ PSDResult pointSourceDetection(const ImageD& img, double sigma, const PSDOptions
         gx2[i] = g[i] * x * x;
     }
 
-    // convolutions
-    ImageD imgXT = padarrayXT_symmetric(img, w);
+    // convolutions (element-wise loops are parallelised over pixels; each
+    // pixel's value is computed by the same operations regardless of threads)
+    const int nth = opt.threads > 1 ? opt.threads : 1;
+    prof::Scoped pConv(prof::PadConv);
+    ImageD imgXT = padarrayXT_symmetric(img, w, nth);
     ImageD imgXT2(imgXT.ny(), imgXT.nx());
-    for (std::size_t i = 0; i < imgXT.size(); ++i) imgXT2[i] = imgXT[i] * imgXT[i];
-    ImageD fg = conv2_sep_valid(g, g, imgXT);
-    ImageD fu = conv2_sep_valid(u, u, imgXT);
-    ImageD fu2 = conv2_sep_valid(u, u, imgXT2);
+    const long nXT = static_cast<long>(imgXT.size());
+    #pragma omp parallel for schedule(static) num_threads(nth) if(nth > 1)
+    for (long i = 0; i < nXT; ++i) imgXT2[i] = imgXT[i] * imgXT[i];
+    ImageD fg = conv2_sep_valid(g, g, imgXT, nth);
+    ImageD fu = conv2_sep_valid(u, u, imgXT, nth);
+    ImageD fu2 = conv2_sep_valid(u, u, imgXT2, nth);
 
     // Laplacian of Gaussian
-    ImageD cxx = conv2_sep_valid(g, gx2, imgXT);   // conv2(g, gx2, ...): columns with g, rows with gx2
-    ImageD cyy = conv2_sep_valid(gx2, g, imgXT);   // conv2(gx2, g, ...)
+    ImageD cxx = conv2_sep_valid(g, gx2, imgXT, nth);   // conv2(g, gx2, ...): columns with g, rows with gx2
+    ImageD cyy = conv2_sep_valid(gx2, g, imgXT, nth);   // conv2(gx2, g, ...)
+    pConv.stop();
+    prof::Scoped pArith(prof::LoGArith);
     ImageD imgLoG(ny, nx);
     const double s2 = sigma * sigma, s4 = s2 * s2;
-    for (std::size_t i = 0; i < imgLoG.size(); ++i) {
+    const long nPix = static_cast<long>(imgLoG.size());
+    #pragma omp parallel for schedule(static) num_threads(nth) if(nth > 1)
+    for (long i = 0; i < nPix; ++i) {
         double v = 2.0 * fg[i] / s2 - (cxx[i] + cyy[i]) / s4;
         imgLoG[i] = v / (2.0 * PI * s2);
     }
@@ -59,13 +81,16 @@ PSDResult pointSourceDetection(const ImageD& img, double sigma, const PSDOptions
     // solution to linear system
     ImageD A_est(ny, nx), c_est(ny, nx);
     const double denom = g2sum - gsum * gsum / n;
-    for (std::size_t i = 0; i < A_est.size(); ++i) {
+    #pragma omp parallel for schedule(static) num_threads(nth) if(nth > 1)
+    for (long i = 0; i < nPix; ++i) {
         A_est[i] = (fg[i] - gsum * fu[i] / n) / denom;
         c_est[i] = (fu[i] - A_est[i] * gsum) / n;
     }
 
+    pArith.stop();
     ImageU8 mask(ny, nx, 1);
     ImageD pvalImg;
+    prof::Scoped pPre(prof::Prefilter);
     if (opt.prefilter) {
         // J = [g(:) ones(n,1)]; C = inv(J'*J)  (2x2 inverse computed like MATLAB's inv via LU)
         // J'J = [g2sum gsum; gsum n]
@@ -76,8 +101,25 @@ PSDResult pointSourceDetection(const ImageD& img, double sigma, const PSDOptions
         const double C11 = d / det;
 
         const double kLevel = norminv(1.0 - opt.alpha / 2.0);
-        pvalImg = ImageD(ny, nx);
-        for (std::size_t i = 0; i < A_est.size(); ++i) {
+        if (dbg) pvalImg = ImageD(ny, nx);
+
+        // The mask only needs the decision  tcdf(-T, df2) < 0.05.  For a
+        // fixed df, tcdf is strictly increasing in its argument, so the
+        // decision is  -T < q(df2)  with q(df) the 5 % quantile, and q(df)
+        // increases with df.  df2 = (n-1)(a+b)^2/(a^2+b^2) with a, b >= 0
+        // lies in [n-1, 2(n-1)], hence q(df2) is in [qLo, qHi].  Pixels with
+        // -T clearly below qLo or clearly above qHi are decided without
+        // evaluating tcdf; the remaining band (and every pixel whose T or
+        // df2 is not finite / not in range) uses the exact evaluation, so the
+        // mask is identical to the one from evaluating tcdf everywhere.
+        const double dfLo = n - 1.0, dfHi = 2.0 * (n - 1.0);
+        const double qLo = tinv05(dfLo), qHi = tinv05(dfHi);
+        const double margin = 1e-3;   // in units of t; the p-value changes by ~1e-4 over it, evaluation noise is ~1e-15
+        const double xSure1 = qLo - margin, xSure0 = qHi + margin;
+        const double dfSlack = 1e-9 * dfHi;
+
+        #pragma omp parallel for schedule(static) num_threads(nth) if(nth > 1)
+        for (long i = 0; i < nPix; ++i) {
             const double A = A_est[i], c = c_est[i];
             const double f_c = fu2[i] - 2.0 * c * fu[i] + n * c * c;
             double RSS = A * A * g2sum - 2.0 * A * (fg[i] - c * gsum) + f_c;
@@ -90,9 +132,14 @@ PSDResult pointSourceDetection(const ImageD& img, double sigma, const PSDOptions
             const double df2 = (n - 1.0) * (sA2 + sc2) * (sA2 + sc2) / (sA2 * sA2 + sc2 * sc2);
             const double scomb = std::sqrt((sA2 + sc2) / n);
             const double T = (A - sigma_res * kLevel) / scomb;
-            const double pval = tcdf(-T, df2);
-            pvalImg[i] = pval;
-            mask[i] = (pval < 0.05) ? 1 : 0;
+            const double xarg = -T;
+            const bool inRange = std::isfinite(xarg) && std::isfinite(df2) && df2 >= dfLo - dfSlack && df2 <= dfHi + dfSlack;
+            unsigned char m;
+            if (inRange && xarg < xSure1) m = 1;
+            else if (inRange && xarg > xSure0) m = 0;
+            else m = (tcdf(xarg, df2) < 0.05) ? 1 : 0;
+            mask[i] = m;
+            if (dbg) pvalImg[i] = tcdf(xarg, df2);
         }
     }
     if (dbg) {
@@ -103,10 +150,14 @@ PSDResult pointSourceDetection(const ImageD& img, double sigma, const PSDOptions
         dbg->maskPrefilter = mask;
     }
 
+    pPre.stop();
     // all local max
-    ImageD allMax = locmax2d(imgLoG, 2 * static_cast<int>(std::ceil(sigma)) + 1);
+    prof::Scoped pLM(prof::LocMax);
+    ImageD allMax = locmax2d(imgLoG, 2 * static_cast<int>(std::ceil(sigma)) + 1, nth);
+    pLM.stop();
 
     // local maxima above threshold in image domain
+    prof::Scoped pOther(prof::Other);
     ImageD imgLM(ny, nx);
     double lmSum = 0.0;
     for (std::size_t i = 0; i < imgLM.size(); ++i) {
@@ -153,8 +204,11 @@ PSDResult pointSourceDetection(const ImageD& img, double sigma, const PSDOptions
     FitGaussiansOptions fo;
     fo.alpha = opt.alpha;
     fo.mask = &mask;
+    fo.threads = nth;
+    pOther.stop();
     PStruct P = fitGaussians2D(img, lmx, lmy, Ainit, sig, cinit, opt.mode, fo);
     if (dbg) dbg->fitAll = P;
+    prof::Scoped pRed(prof::Redundancy);
 
     // remove NaN values
     std::vector<char> keep(P.size());
@@ -207,8 +261,10 @@ PSDResult pointSourceDetection(const ImageD& img, double sigma, const PSDOptions
     R.isPSF.resize(P.size());
     for (std::size_t i = 0; i < P.size(); ++i) R.isPSF[i] = P.hval_AD[i] ? 0 : 1;
     R.empty = false;
+    pRed.stop();
 
     if (opt.refineMaskValid) {
+        prof::Scoped pCC(prof::ConnComp);
         ConnComp cc = bwconncomp8(mask);
         ImageI32 labels = labelmatrix(cc, ny, nx);
         std::vector<char> used(cc.numObjects + 1, 0);

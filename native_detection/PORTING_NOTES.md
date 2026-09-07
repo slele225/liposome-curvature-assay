@@ -501,3 +501,119 @@ detection pass ~9 s); the speed-up comes from parallelism, which MATLAB only
 gets through its parallel pool. Obvious remaining hot spots (not optimised, to
 keep the numerics untouched): the per-candidate allocation of the LM state,
 `exp` evaluation in the model, and the Jacobian QR in GSL 1.16 code.
+
+## 8. Runtime optimisation (September 2026)
+
+After the validation in §7 the implementation was profiled and optimised
+**without changing any computed value**: every accepted change was checked
+to give byte-identical `detections_all.tsv` / per-movie TSV output on the
+21-cell 512×512 SLiC condition and on the 10-cell 1024×1024 reference set
+(§7.3, i.e. the output that was compared with MATLAB), bit-identical
+`fitGaussian2D` results on the 356 recorded real candidate windows of
+`probe_mex_options.m` (`tests/fit_bench.cpp` results file), and the
+unit/regression tests (now 2407 checks, including thread-count and
+prefilter-screening identity checks). Output is byte-identical for 1, 2,
+4, 8 and 12 threads at both `--par-level` settings.
+
+### 8.1 Profile before optimisation (single thread, 21-cell set, 722 s)
+
+Measured with the built-in phase timers (`--profile`, per-thread
+accumulators, ~3 % overhead):
+
+| phase | share |
+|---|---|
+| Gaussian fits, LM iterations | 87.8 % |
+| Gaussian fits, LM setup (solver allocation, initial f/J/QR) | 2.9 % |
+| Gaussian fits, covariance + residual statistics | 2.0 % |
+| Gaussian fits, Anderson–Darling test | 2.8 % |
+| prefilter t-test (`tcdf` per pixel) | 2.2 % |
+| separable convolutions (incl. padding) | 0.6 % |
+| locmax2d | 0.4 % |
+| connected components / labels | 0.3 % |
+| TSV writing | 0.3 % |
+| TIFF loading, redundancy query, GMM, masks, other | < 0.1 % each |
+
+Inside an LM iteration (micro-benchmark on 13×13 windows): pivoted QR of
+the Jacobian (`gsl_linalg_QRPT_decomp`, dominated by the scaled `dnrm2`
+column norms) ≈ 37 %, Jacobian evaluation ≈ 10 %, `Q^T f` ≈ 7 %, model
+evaluation ≈ 4 %, the rest `lmpar`/`qrsolv`, norms and copies. By caller,
+the sigma estimation (detection pass at σ = 1.5 plus the free-σ refit) was
+76 % of all fit time, the master-channel detection 9 %, the slave-channel
+fits 15 %.
+
+### 8.2 Accepted optimisations
+
+1. **Identical sigma-estimation image instances processed once.**
+   `getGaussianPSFsigmaFromData` receives `round(linspace(1, L, nf))`
+   frames per movie; for single-frame movies (the SLiC case) that is the
+   same frame `nf` times (2× on the 21-cell set, 4× on the 10-cell set).
+   The detection + refit of an image is a deterministic function of its
+   pixels alone (the RNG is only consumed by the GMM afterwards), so
+   repeated pointers are computed once and the per-image results copied;
+   the concatenated `svect`, the GMM input and the RNG stream are
+   unchanged. `estimate_sigma` loads each distinct frame once. This is the
+   largest gain (sigma phase 553 s → 250 s single-threaded on the 21-cell
+   set).
+2. **Inline level-1 BLAS in the GSL 1.16 solver** (`g116_blas.h`): `ddot`,
+   `daxpy`, `dscal`, `dnrm2`, `idamax`, vector/matrix copies, `x *= -1`,
+   `set_zero` and the inverse permutation are implemented in-process,
+   following the reference gslcblas / GSL sources operation for operation
+   (same loop order, no reassociation, `/fp:precise`), instead of crossing
+   the gsl.dll → gslcblas.dll boundary hundreds of times per iteration.
+   The `dnrm2` quotient that the reference computes twice is computed
+   once (same bits).
+3. **Per-thread reusable fit workspace**: the LM solver state, the
+   covariance matrix and the index/factor buffers are kept per thread and
+   re-used across fits of the same (n, p) (`g116_solver_set` re-initialises
+   every field the iteration reads); the valid-pixel column/row indices are
+   precomputed once per fit instead of an integer division and modulo per
+   pixel per evaluation; the Anderson–Darling scratch vectors are reused.
+   The GSL error handler is switched off once per process instead of
+   set/restored per fit (it was also a data race between threads before).
+4. **Candidate-level parallelism** (`--par-level candidate`, default):
+   within a frame the candidate fits are distributed over the threads
+   (dynamic schedule, chunks of 4, results written by index), and the
+   convolutions, `locmax2d`, the prefilter and the element-wise image
+   arithmetic are split over columns/pixels; the movie/frame/image loops
+   run sequentially, so no OpenMP region is nested (MSVC serialises nested
+   regions and re-creates thread teams for them). `--par-level movie`
+   keeps the original scheme. Per-movie output files are written in
+   parallel.
+5. **Prefilter screening.** The prefilter mask needs only the decision
+   `tcdf(-T, df2) < 0.05`. `tcdf` is strictly increasing in its argument
+   and its 5 % quantile `q(df)` increases with `df`; `df2 =
+   (n-1)(a+b)²/(a²+b²)` lies in `[n-1, 2(n-1)]`, so `q(df2)` lies in
+   `[q(n-1), q(2(n-1))]` (obtained by bisection on the same `tcdf`).
+   Pixels with `-T` at least 10⁻³ below the lower or above the upper bound
+   are decided without evaluating `tcdf`; the band in between, and any
+   pixel with non-finite `T`/`df2`, is evaluated exactly as before. The
+   unit tests check the screened mask against the exact per-pixel decision
+   on the reference image and on a synthetic image with spots spanning the
+   threshold; `--dump-dir` still writes the exact p-value image.
+6. **Output**: rows are formatted with `std::to_chars` (specified to match
+   `printf("%.17g")` for finite values; non-finite values still go through
+   `snprintf`) into a buffer and written with `fwrite`; the output files
+   are byte-identical.
+
+### 8.3 Tried and not adopted
+
+* `/GL` + `/LTCG` with `/GS-`, and `/arch:AVX2`: bit-identical results but
+  no measurable change in the fit micro-benchmark (within run-to-run
+  noise); the defaults are kept. The CMake options `CME_LTCG`, `CME_NO_GS`,
+  `CME_AVX2` remain available for experiments.
+* Replacing the scaled `dnrm2` by a plain sum of squares, using
+  `1/sigma²` multiplications in the Jacobian, or vectorising the exponent
+  evaluations: all would change rounding and were not attempted.
+* FFT convolution: convolution is < 1 % of the runtime; not worth a
+  numerically different implementation.
+
+### 8.4 Result
+
+21-cell 512×512 SLiC condition, wall-clock (initial port → optimised):
+1 thread 702.7 s → 368.8 s; 2 threads 389.3 → 171.2; 4 threads 190.8 →
+86.1; 8 threads 118.8 → 56.0; 12 threads 102.1 → 52.9. 10-cell 1024×1024
+reference set: 1 thread 2451 s → 360.4 s, 12 threads 366 s → 59.9 s
+(MATLAB: 1903 s). Remaining
+profile (12 threads, 21-cell set, thread-time): LM iterations 90 %, of
+which the pivoted QR 60 %; per-fit overheads (setup, covariance,
+Anderson–Darling) 9 %; everything else ≈ 1 %.

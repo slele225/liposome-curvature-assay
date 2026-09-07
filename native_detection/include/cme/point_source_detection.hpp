@@ -17,6 +17,7 @@ struct PSDOptions {
     bool prefilter = true;
     bool refineMaskLoG = true;
     bool refineMaskValid = true;
+    int threads = 1;               // > 1: parallel over image columns / candidate fits (identical output)
 };
 
 // Intermediates that the MATLAB reference dump also records.

@@ -10,6 +10,7 @@ plots/
 # reference data and the vendored third_party/ libraries are tracked.
 native_detection/build/
 native_detection/build-*/
+native_detection/build_*/
 native_detection/out/
 native_detection/.vs/
 CMakeCache.txt

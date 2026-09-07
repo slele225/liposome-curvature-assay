@@ -19,6 +19,7 @@ struct RunOptions {
     bool writeMasks = true;
     bool writeMatlabLayout = true;  // write Detection/ under the master channel like MATLAB
     int threads = 1;
+    ParLevel parLevel = ParLevel::Candidate;   // where the threads are applied (output is identical either way)
 };
 
 // One frame's frameInfo entry (multi-channel fields are nCh x np, stored per channel).

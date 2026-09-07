@@ -1,10 +1,12 @@
 #include "cme/fit_gaussians2d.hpp"
 #include "cme/morphology.hpp"
 #include "cme/stats.hpp"
+#include "cme/profile.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 namespace cme {
 
@@ -58,8 +60,11 @@ PStruct fitGaussians2D(const ImageD& img,
     const long nx = static_cast<long>(img.nx());
 
     ImageI32 labels;
-    if (opt.mask) labels = bwlabel8(*opt.mask);
-    else labels = ImageI32(img.ny(), img.nx(), 0);
+    {
+        prof::Scoped pCC(prof::ConnComp);
+        if (opt.mask) labels = bwlabel8(*opt.mask);
+        else labels = ImageI32(img.ny(), img.nx(), 0);
+    }
 
     PStruct P;
     P.resize(np);
@@ -114,18 +119,20 @@ PStruct fitGaussians2D(const ImageD& img,
     for (int xx = 0; xx < W; ++xx) for (int yy = 0; yy < W; ++yy) g2[yy + xx * W] = g1[yy] * g1[xx];
 
     std::vector<double> T(np, 0.0), df2(np, 0.0);
-    ImageD window(W, W);
 
-    for (std::size_t p = 0; p < np; ++p) {
+    // Every candidate is fitted independently and writes only its own slot
+    // of P / T / df2, so the candidate loop can run on several threads with
+    // identical results (the window and label buffers are per thread).
+    auto fit_one = [&](std::size_t p, ImageD& window, std::vector<char>& otherComp) {
         // ignore points in border (1-based test in MATLAB)
-        if (!(xi[p] > w4 && xi[p] <= nx - w4 && yi[p] > w4 && yi[p] <= ny - w4)) continue;
+        if (!(xi[p] > w4 && xi[p] <= nx - w4 && yi[p] > w4 && yi[p] <= ny - w4)) return;
 
+        prof::Scoped pPrep(prof::FitPrep);
         const long x0 = xi[p] - 1 - w4;   // 0-based window origin
         const long y0 = yi[p] - 1 - w4;
 
         // label mask window; own label (centre) -> 0
         const int centreLabel = labels(static_cast<std::size_t>(yi[p] - 1), static_cast<std::size_t>(xi[p] - 1));
-        std::vector<char> otherComp(static_cast<std::size_t>(W) * W, 0);
         for (int xx = 0; xx < W; ++xx) {
             for (int yy = 0; yy < W; ++yy) {
                 int l = labels(static_cast<std::size_t>(y0 + yy), static_cast<std::size_t>(x0 + xx));
@@ -152,7 +159,7 @@ PStruct fitGaussians2D(const ImageD& img,
             if (otherComp[i]) window[i] = NaN;
             if (std::isfinite(window[i])) ++npx;
         }
-        if (npx < 10) continue;
+        if (npx < 10) return;
 
         double A_init;
         if (Ain.empty()) {
@@ -164,7 +171,9 @@ PStruct fitGaussians2D(const ImageD& img,
         }
 
         std::array<double, 5> prm0 = {x[p] - static_cast<double>(xi[p]), y[p] - static_cast<double>(yi[p]), A_init, sigma[p], c_init};
+        pPrep.stop();
         FitResult fr = fitGaussian2D(window, prm0, mode);
+        prof::Scoped pPost(prof::FitPrep);
 
         const double dx = fr.prm[0], dy = fr.prm[1];
         if (dx > -w2 && dx < w2 && dy > -w2 && dy < w2 && fr.prm[2] < 2.0 * diffRange) {
@@ -200,7 +209,29 @@ PStruct fitGaussians2D(const ImageD& img,
             for (double gv : g2) if (A_est * gv > fr.std * kLevel) ++cnt;
             P.mask_Ar[p] = cnt;
         }
+    };
+
+    const int nth = opt.threads > 1 ? opt.threads : 1;
+    const int ctx = prof::context;
+    std::string firstError;
+    #pragma omp parallel num_threads(nth) if(nth > 1)
+    {
+        prof::context = ctx;
+        ImageD window(W, W);
+        std::vector<char> otherComp(static_cast<std::size_t>(W) * W, 0);
+        #pragma omp for schedule(dynamic, 4)
+        for (long pp = 0; pp < static_cast<long>(np); ++pp) {
+            try {
+                fit_one(static_cast<std::size_t>(pp), window, otherComp);
+            } catch (const std::exception& e) {
+                #pragma omp critical
+                { if (firstError.empty()) firstError = e.what(); }
+            }
+        }
     }
+    if (!firstError.empty()) throw std::runtime_error(firstError);
+
+    prof::Scoped pPval(prof::PvalT);
     for (std::size_t p = 0; p < np; ++p) {
         P.pval_Ar[p] = tcdf(-T[p], df2[p]);
         P.hval_Ar[p] = (P.pval_Ar[p] < opt.alphaT) ? 1 : 0;

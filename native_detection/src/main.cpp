@@ -4,6 +4,7 @@
 #include "cme/run_detection.hpp"
 #include "cme/output.hpp"
 #include "cme/dump.hpp"
+#include "cme/profile.hpp"
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -12,6 +13,9 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -32,7 +36,10 @@ void usage() {
         "  --no-masks           do not write Detection/dmasks.tif\n"
         "  --no-matlab-layout   do not write Detection/detection_cpp.tsv under the master channel\n"
         "  --movie-selector S   loadConditionData 'MovieSelector' (default 'cell')\n"
-        "  --threads N          OpenMP threads for frame-level parallelism (default 1)\n";
+        "  --threads N          OpenMP threads (default 1); output does not depend on the thread count\n"
+        "  --par-level L        where the threads are used: 'candidate' (default: over candidate fits and\n"
+        "                       image columns within each frame) or 'movie' (over movies/frames/images)\n"
+        "  --profile            print a per-phase timing breakdown at the end (diagnostic)\n";
 }
 
 std::vector<std::string> split(const std::string& s, char sep) {
@@ -51,6 +58,7 @@ int main(int argc, char** argv) {
     unsigned seed = 1;
     bool writeMasks = true, matlabLayout = true;
     int threads = 1;
+    cme::ParLevel parLevel = cme::ParLevel::Candidate;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto need = [&](const char* name) -> std::string {
@@ -69,10 +77,23 @@ int main(int argc, char** argv) {
         else if (a == "--no-matlab-layout") matlabLayout = false;
         else if (a == "--movie-selector") selector = need("--movie-selector");
         else if (a == "--threads") threads = std::stoi(need("--threads"));
+        else if (a == "--par-level") {
+            const std::string v = need("--par-level");
+            if (v == "candidate") parLevel = cme::ParLevel::Candidate;
+            else if (v == "movie") parLevel = cme::ParLevel::Movie;
+            else { std::cerr << "unknown --par-level: " << v << " (expected candidate|movie)\n"; return 2; }
+        }
+        else if (a == "--profile") cme::prof::enabled = true;
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else { std::cerr << "unknown argument: " << a << "\n"; usage(); return 2; }
     }
     if (input.empty() || channels.empty() || master.empty()) { usage(); return 2; }
+#ifdef _OPENMP
+    // Exactly one loop level is parallel (--par-level); the other level runs as
+    // a plain loop, so no OpenMP region is ever nested inside another one and
+    // the runtime reuses a single thread pool.  Keep the team size fixed.
+    omp_set_dynamic(0);
+#endif
     if (channels.front() != master) {
         std::cerr << "error: --master (" << master << ") must equal the first entry of --channels (" << channels.front()
                   << "). Channels are not reordered silently; pass them in the order the master should come first.\n";
@@ -97,6 +118,7 @@ int main(int argc, char** argv) {
         ro.seed = seed;
         ro.dumpDir = dumpDir;
         ro.threads = threads;
+        ro.parLevel = parLevel;
         ro.writeMasks = writeMasks;
         if (!sigmaArg.empty()) {
             for (const auto& s : split(sigmaArg, ',')) ro.sigma.push_back(std::stod(s));
@@ -123,14 +145,24 @@ int main(int argc, char** argv) {
             output = in + "/cme_detect_output";
         }
         cme::write_condition_tables(output, outs, channels, S.sigma);
-        for (const auto& o : outs) {
-            if (matlabLayout) {
-                const std::string det = o.data.channels[0] + "Detection";
-                fs::create_directories(det);
-                cme::write_movie_tsv(det + "/detection_cpp.tsv", o, channels);
+        // per-movie files are independent of each other: write them in parallel
+        std::string outputError;
+        #pragma omp parallel for schedule(dynamic) num_threads(threads > 1 ? threads : 1) if(threads > 1)
+        for (long oi = 0; oi < static_cast<long>(outs.size()); ++oi) {
+            const auto& o = outs[static_cast<std::size_t>(oi)];
+            try {
+                if (matlabLayout) {
+                    const std::string det = o.data.channels[0] + "Detection";
+                    fs::create_directories(det);
+                    cme::write_movie_tsv(det + "/detection_cpp.tsv", o, channels);
+                }
+                if (writeMasks) cme::write_masks(o);
+            } catch (const std::exception& e) {
+                #pragma omp critical
+                { if (outputError.empty()) outputError = e.what(); }
             }
-            if (writeMasks) cme::write_masks(o);
         }
+        if (!outputError.empty()) throw std::runtime_error(outputError);
         const auto t5 = clock::now();
         auto ms = [](clock::time_point a, clock::time_point b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
         std::printf("Timing (ms): loadConditionData %.1f | sigma estimation %.1f | detection %.1f | output %.1f | total %.1f\n",
@@ -138,6 +170,7 @@ int main(int argc, char** argv) {
         std::size_t total = 0;
         for (const auto& o : outs) for (const auto& F : o.frames) total += F.np;
         std::printf("Detections: %zu rows written to %s\n", total, output.c_str());
+        if (cme::prof::enabled) cme::prof::report(stdout, ms(t0, t5) / 1000.0);
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << "\n";
         return 1;

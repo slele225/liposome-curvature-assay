@@ -12,7 +12,8 @@ namespace cme {
 //   fImg(fImg2 == fImg) = 0;  fImg(fImg ~= img) = 0;  border strip (half window) = 0
 // maskSize is made odd if even.  Returns an image equal to img at strict
 // local maxima and 0 elsewhere (exactly like the MATLAB function).
-ImageD locmax2d(const ImageD& img, int maskSize);
+// `threads` > 1 parallelises over columns (each pixel is independent).
+ImageD locmax2d(const ImageD& img, int maskSize, int threads = 1);
 
 struct ConnComp {
     std::size_t numObjects = 0;

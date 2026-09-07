@@ -100,7 +100,10 @@ cme_detect --input <condition dir> --channels ch1,ch2[,...] --master ch1 [option
   --no-masks           do not write Detection/dmasks.tif
   --no-matlab-layout   do not write Detection/detection_cpp.tsv under the master channel
   --movie-selector S   loadConditionData 'MovieSelector' (default 'cell')
-  --threads N          OpenMP threads for frame-level parallelism (default 1)
+  --threads N          OpenMP threads (default 1); output does not depend on the thread count
+  --par-level L        where the threads are used: 'candidate' (default: over candidate fits and
+                       image columns within each frame) or 'movie' (over movies/frames/images)
+  --profile            print a per-phase timing breakdown at the end (diagnostic)
 ```
 
 (`cme_detect --help` prints the same text; that is the authoritative version.)
@@ -185,11 +188,23 @@ python analyze_cpp.py `
 
 ## Threading and determinism
 
-* `--threads N` enables OpenMP parallelism over frames and movies. Every
-  frame is processed independently and the sigma estimation stays
-  sequential, so **results do not depend on the thread count**: in the
-  regression runs `detections_all.tsv` was byte-identical for 1 and 12
-  threads.
+* `--threads N` enables OpenMP parallelism. With the default
+  `--par-level candidate` the threads work inside each frame: the
+  separable convolutions, the local-maximum search and the per-pixel
+  prefilter are split over image columns/pixels, and the Gaussian fits are
+  distributed over candidates; the movie/frame loops run sequentially.
+  `--par-level movie` instead distributes movies, frames and
+  sigma-estimation images over the threads with sequential inner work
+  (the original scheme). In both schemes every unit of work writes only
+  its own output slots, no floating-point reduction is split across
+  threads and the RNG-consuming GMM step is sequential, so **results do
+  not depend on the thread count or the level**: in the regression runs
+  `detections_all.tsv` was byte-identical for 1, 2, 4, 8 and 12 threads at
+  both levels.
+* The two levels are within a few percent of each other when there are
+  more movies than threads; the candidate level also scales when there are
+  only a few movies (or a single multi-frame movie) and needs less memory
+  (one frame's intermediates at a time).
 * With the same inputs, `--seed` and `--threads`, repeated runs produce
   identical output. The MATLAB RNG stream (`rng(N)`, Mersenne Twister with
   MATLAB's `rand`/`randi`/`randperm` semantics) is reproduced so that the
@@ -290,23 +305,47 @@ the repository's pytest suite:
 pytest tests/test_analyze_cpp.py
 ```
 
+`fit_bench` (built alongside) is an in-process micro-benchmark of
+`fitGaussian2D` on recorded real candidate windows; with a results file it
+doubles as a bit-identity check between two builds:
+
+```powershell
+.\build\Release\fit_bench.exe C:\path\to\mex_probe.txt 20 results.txt
+```
+
 ## Performance
 
 In project regression tests the native implementation reproduced
 cmeAnalysis's detection/filter decisions while providing substantial
 runtime reductions. Runtime depends on image count and size, CPU and
-thread count; measured examples:
+thread count. The numbers below were measured on one laptop (Intel Core
+i7-1355U: 2 performance + 8 efficiency cores, 12 hardware threads, Windows
+11); the "optimised" column is the current build, "initial port" the
+first validated build (September 2026), both producing byte-identical
+output.
 
-| example run | wall-clock |
-|---|---|
-| 10-cell reference data set (80 image instances, 1024×1024), MATLAB R2025a `loadConditionData` + `rng(1)` + `runDetection` (default 2-worker `parfor` pool) | 1903 s |
-| same data set, `cme_detect --threads 1` | 2451 s |
-| same data set, `cme_detect --threads 12` (final build) | 366 s, byte-identical output across thread counts |
-| a practical SLiC condition (488 nm master), `cme_detect` | roughly 25 s, versus several minutes with the prior MATLAB workflow on the same machine |
+| data set | run | initial port | optimised |
+|---|---|---|---|
+| 10-cell reference set (1024×1024, 2 channels; 80 sigma-estimation image instances of 20 distinct images) | MATLAB R2025a `loadConditionData` + `rng(1)` + `runDetection` (2-worker `parfor` pool) | 1903 s | — |
+| | `cme_detect --threads 1` | 2451 s | 360.4 s |
+| | `cme_detect --threads 12` | 366 s | 59.9 s |
+| 21-cell SLiC condition (512×512, 2 channels; 42 instances of 21 distinct images) | `cme_detect --threads 1` | 702.7 s | 368.8 s |
+| | `--threads 2` | 389.3 s | 171.2 s |
+| | `--threads 4` | 190.8 s | 86.1 s |
+| | `--threads 8` | 118.8 s | 56.0 s |
+| | `--threads 12` | 102.1 s | 52.9 s |
 
-Single-threaded, the port is about as fast as MATLAB per image; the
-speed-up comes from frame- and movie-level parallelism. No numerical hot
-spots have been optimised, deliberately, to keep the numerics untouched.
+Where the time goes (single thread, 21-cell set, initial port): Gaussian
+fitting 95 % (Levenberg–Marquardt iterations 88 %, of which the pivoted QR
+of the Jacobian is about 60 %), per-pixel prefilter t-test 2 %,
+convolutions 0.6 %, everything else (TIFF I/O, local maxima, connected
+components, output) below 0.5 % each. The optimisations that produced the
+"optimised" column, all with bit-identical output, are documented in
+[PORTING_NOTES.md §8](PORTING_NOTES.md); the largest single one is that the
+sigma estimation no longer re-processes the identical image instances that
+MATLAB's `round(linspace(1, L, nf))` frame sampling produces for short
+movies. Scaling flattens beyond 8 threads on this CPU because only the two
+performance cores are hyper-threaded.
 
 ## Layout
 
@@ -315,10 +354,12 @@ native_detection/
   CMakeLists.txt, README.md, PORTING_NOTES.md, THIRD_PARTY_NOTICES.md, LICENSE
   include/cme/*.hpp, src/*.cpp        the port (PORTING_NOTES.md §1 maps them to the .m files)
   third_party/gsl, third_party/tiff   pre-built GSL 2.8 / libtiff 4.7.0 (MSVC x64) + licences
-  third_party/gsl116                  GSL 1.16 Levenberg-Marquardt sources (verbatim, GPL-3)
-  tests/unit_tests.cpp                regression tests vs MATLAB/MEX reference values
+  third_party/gsl116                  GSL 1.16 Levenberg-Marquardt sources (verbatim, GPL-3) + g116_blas.h inline BLAS
+  include/cme/profile.hpp, src/profile.cpp   --profile phase timers
+  tests/unit_tests.cpp                regression tests vs MATLAB/MEX reference values (+ thread/screening identity checks)
   tests/reference_values.txt, tests/ad_reference*.txt   reference data produced by MATLAB
   tests/compare_reference.py          stage-by-stage / end-to-end comparison tool
+  tests/fit_bench.cpp                 fitGaussian2D micro-benchmark / bit-identity check between builds
   tests/fit_probe.cpp, tests/profile_sigma.cpp          diagnostics
   reference_tools/*.m                 MATLAB scripts that generate the golden data
   ../analyze_cpp.py                   analyze_matlab.py equivalent for the TSV output (repo root)

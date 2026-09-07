@@ -175,9 +175,12 @@ all of CMEanalysis (no tracking, lifetime analysis, GUI or 3-D).
 * It is **substantially faster** and avoids the MATLAB / Parallel
   Computing Toolbox dependency. Runtime depends on image count, CPU and
   thread count; measured examples: the 10-cell reference benchmark took
-  1903 s in MATLAB versus 366 s natively with 12 threads, and a practical
-  SLiC condition ran in roughly 25 s natively versus several minutes with
-  the prior MATLAB workflow.
+  1903 s in MATLAB versus 366 s natively with 12 threads in the first
+  validated build and 60 s after optimisation; a practical 21-cell SLiC
+  condition takes about 53 s with 12 threads (about 6 minutes with one)
+  versus many minutes with the prior MATLAB workflow. The optimised build
+  produces byte-identical output to the validated one; see
+  `native_detection/PORTING_NOTES.md` §8.
 * The original MATLAB workflow remains available as the reference
   implementation (Step 2, fallback, below).
 

@@ -2,11 +2,14 @@
 #include "cme/tiff_io.hpp"
 #include "cme/morphology.hpp"
 #include "cme/dump.hpp"
+#include "cme/profile.hpp"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <map>
+#include <memory>
 #include <stdexcept>
 #ifdef _OPENMP
 #include <omp.h>
@@ -36,6 +39,7 @@ std::vector<std::size_t> sample_frames(std::size_t L, std::size_t nf) {
 }
 
 ImageD load_frame(const MovieData& d, std::size_t c, std::size_t f) {
+    prof::Scoped p(prof::TiffLoad);
     FrameRef r = frame_ref(d, c, f);
     return read_tiff_frame_double(r.path, r.directory);
 }
@@ -53,16 +57,28 @@ SigmaEstimate estimate_sigma(const std::vector<MovieData>& data, const RunOption
     const std::size_t nf = static_cast<std::size_t>(std::round(40.0 / static_cast<double>(nd)));
     std::cout << "Determining Gaussian PSF parameters from data ... " << std::flush;
     for (std::size_t c = 0; c < nCh; ++c) {
-        // frames = cell(nd, nf); frames(i,:) = ...; vertcat(frames(:)) -> column-major
-        std::vector<std::vector<ImageD>> frames(nd);
+        // frames = cell(nd, nf); frames(i,:) = ...; vertcat(frames(:)) -> column-major.
+        // A frame index that round(linspace(1, L, nf)) repeats is loaded once
+        // and referenced several times; getGaussianPSFsigmaFromData treats
+        // repeated pointers as the identical image instances they are.
+        std::vector<std::vector<const ImageD*>> frames(nd);
+        std::vector<std::unique_ptr<ImageD>> storage;
         for (std::size_t i = 0; i < nd; ++i) {
             auto fidx = sample_frames(data[i].movieLength, nf);
-            for (std::size_t f : fidx) frames[i].push_back(load_frame(data[i], c, f));
+            std::map<std::size_t, const ImageD*> loaded;
+            for (std::size_t f : fidx) {
+                auto it = loaded.find(f);
+                if (it == loaded.end()) {
+                    storage.push_back(std::make_unique<ImageD>(load_frame(data[i], c, f)));
+                    it = loaded.emplace(f, storage.back().get()).first;
+                }
+                frames[i].push_back(it->second);
+            }
         }
         std::vector<const ImageD*> list;
         for (std::size_t f = 0; f < nf; ++f)
-            for (std::size_t i = 0; i < nd; ++i) list.push_back(&frames[i][f]);
-        S.sigmaRaw[c] = getGaussianPSFsigmaFromData(list, rng, &S.debug[c], opt.threads);
+            for (std::size_t i = 0; i < nd; ++i) list.push_back(frames[i][f]);
+        S.sigmaRaw[c] = getGaussianPSFsigmaFromData(list, rng, &S.debug[c], opt.threads, opt.parLevel);
         S.sigma[c] = S.sigmaRaw[c];
     }
     std::cout << "done.\n";
@@ -119,9 +135,13 @@ DetectionOutput run_detection_movie(const MovieData& d, const std::vector<double
         fs::create_directories(movieDump);
     }
 
-    #pragma omp parallel for schedule(dynamic) num_threads(opt.threads > 0 ? opt.threads : 1)
-    for (long kk = 1; kk <= static_cast<long>(L); ++kk) {
-        const std::size_t k = static_cast<std::size_t>(kk);
+    const int nthreads = opt.threads > 0 ? opt.threads : 1;
+    const int frameThreads = (opt.parLevel == ParLevel::Movie) ? nthreads : 1;
+    const int innerThreads = (opt.parLevel == ParLevel::Movie) ? 1 : nthreads;
+    // Per-frame work.  At candidate level this runs as a plain loop (the
+    // parallel regions are inside pointSourceDetection / fitGaussians2D); at
+    // movie level the frames are distributed over the threads.
+    auto process_frame = [&](std::size_t k) {
         FrameInfo& F = out.frames[k - 1];
         F.frame = k;
         F.nCh = nCh;
@@ -133,6 +153,7 @@ DetectionOutput run_detection_movie(const MovieData& d, const std::vector<double
         PSDOptions po;
         po.alpha = opt.alpha;
         po.removeRedundant = opt.removeRedundant;
+        po.threads = innerThreads;
         PSDDebug dbg;
         PSDResult R = pointSourceDetection(img, sigma[mCh], po, dump ? &dbg : nullptr);
         out.masks[k - 1] = R.mask;
@@ -145,8 +166,10 @@ DetectionOutput run_detection_movie(const MovieData& d, const std::vector<double
             std::size_t np = P.size();
 
             // component size and intensity for each detection
+            prof::Scoped pCC(prof::ConnComp);
             ConnComp CC = bwconncomp8(R.mask);
             ImageI32 labels = labelmatrix(CC, img.ny(), img.nx());
+            pCC.stop();
             std::vector<double> compSize(CC.numObjects), compInt(CC.numObjects);
             for (std::size_t j = 0; j < CC.numObjects; ++j) {
                 compSize[j] = static_cast<double>(CC.pixelIdxList[j].size());
@@ -167,8 +190,17 @@ DetectionOutput run_detection_movie(const MovieData& d, const std::vector<double
                 F.dRange[ci] = {simg.minval(), simg.maxval()};
                 std::vector<double> xm = F.x[mCh], ym = F.y[mCh];
                 std::vector<double> sig(np, sigma[ci]);
-                PStruct S1 = fitGaussians2D(simg, xm, ym, {}, sig, {}, "Ac");
-                PStruct S2 = fitGaussians2D(simg, xm, ym, S1.A, sig, S1.c, "xyAc");
+                FitGaussiansOptions sfo;
+                sfo.threads = innerThreads;
+                PStruct S1, S2;
+                {
+                    prof::ContextGuard cg(prof::CtxSlaveFixed);
+                    S1 = fitGaussians2D(simg, xm, ym, {}, sig, {}, "Ac", sfo);
+                }
+                {
+                    prof::ContextGuard cg(prof::CtxSlaveLoc);
+                    S2 = fitGaussians2D(simg, xm, ym, S1.A, sig, S1.c, "xyAc", sfo);
+                }
                 std::vector<char> useLoc(np, 0);
                 for (std::size_t p = 0; p < np; ++p) {
                     const double dx = xm[p] - S2.x[p], dy = ym[p] - S2.y[p];
@@ -211,6 +243,12 @@ DetectionOutput run_detection_movie(const MovieData& d, const std::vector<double
             }
         }
         if (dump) dump_frame_info(movieDump, F, d);
+    };
+    if (frameThreads > 1) {
+        #pragma omp parallel for schedule(dynamic) num_threads(frameThreads)
+        for (long kk = 1; kk <= static_cast<long>(L); ++kk) process_frame(static_cast<std::size_t>(kk));
+    } else {
+        for (std::size_t k = 1; k <= L; ++k) process_frame(k);
     }
     return out;
 }
@@ -234,16 +272,21 @@ std::vector<DetectionOutput> runDetection(const std::vector<MovieData>& data, co
     // index, so output order and content do not depend on the schedule.
     const std::size_t nd = data.size();
     std::vector<DetectionOutput> byIndex(nd);
-    const int outerThreads = (nd > 1 && opt.threads > 1) ? std::min<int>(opt.threads, static_cast<int>(nd)) : 1;
+    const bool movieLevel = (opt.parLevel == ParLevel::Movie);
+    const int outerThreads = (movieLevel && nd > 1 && opt.threads > 1) ? std::min<int>(opt.threads, static_cast<int>(nd)) : 1;
     RunOptions inner = opt;
     if (outerThreads > 1) inner.threads = 1;
-    #pragma omp parallel for schedule(dynamic) num_threads(outerThreads)
-    for (long ii = 0; ii < static_cast<long>(nd); ++ii) {
-        const std::size_t i = static_cast<std::size_t>(ii);
-        if (!data[i].hasFrames) continue;
+    auto process_movie = [&](std::size_t i) {
+        if (!data[i].hasFrames) return;
         byIndex[i] = run_detection_movie(data[i], sigma, inner, i);
         #pragma omp critical
         std::cout << "Detection done for " << data[i].cellPath << " (" << byIndex[i].frames.size() << " frame(s))" << std::endl;
+    };
+    if (outerThreads > 1) {
+        #pragma omp parallel for schedule(dynamic) num_threads(outerThreads)
+        for (long ii = 0; ii < static_cast<long>(nd); ++ii) process_movie(static_cast<std::size_t>(ii));
+    } else {
+        for (std::size_t i = 0; i < nd; ++i) process_movie(i);
     }
     std::vector<DetectionOutput> outs;
     for (std::size_t i = 0; i < nd; ++i) {

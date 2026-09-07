@@ -12,6 +12,7 @@
 #include <gsl/gsl_blas.h>
 #include <gsl/gsl_permutation.h>
 #include "g116_linalg.h"
+#include "g116_blas.h"   /* inline level-1 BLAS (bit-identical to gslcblas, no DLL calls) */
 
 double
 g116_householder_transform (gsl_vector * v)

@@ -4,6 +4,7 @@
 #include "cme/gmm.hpp"
 #include "cme/fit_gaussians2d.hpp"
 #include "cme/mt19937.hpp"
+#include "cme/parallel.hpp"
 #include <vector>
 
 namespace cme {
@@ -19,7 +20,15 @@ struct PsfSigmaDebug {
 };
 
 // Returns the estimated sigma; consumes the RNG exactly like MATLAB.
+//
+// `images` may contain the same pointer several times (MATLAB samples
+// round(linspace(1, L, nf)) frames per movie, which repeats frames when the
+// movie is short).  The detection + refit of an image is a deterministic
+// function of its pixels alone (no RNG involved), so repeated pointers are
+// processed once and the per-image results are replicated; the concatenated
+// svect, and therefore the GMM input and RNG consumption, are unchanged.
 double getGaussianPSFsigmaFromData(const std::vector<const ImageD*>& images, MatlabTwister& rng,
-                                   PsfSigmaDebug* dbg = nullptr, int threads = 1);
+                                   PsfSigmaDebug* dbg = nullptr, int threads = 1,
+                                   ParLevel level = ParLevel::Candidate);
 
 } // namespace cme

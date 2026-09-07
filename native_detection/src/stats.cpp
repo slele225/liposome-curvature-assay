@@ -39,9 +39,11 @@ double tcdf(double x, double nu) {
 static double ad_statistic(const std::vector<double>& xin, double mu, double sigma) {
     const std::size_t n = xin.size();
     if (n < 5) throw std::invalid_argument("adtest requires at least 5 samples");
-    std::vector<double> x(xin);
+    // per-thread scratch (called once per Gaussian fit)
+    thread_local std::vector<double> x, z;
+    x.assign(xin.begin(), xin.end());
     std::sort(x.begin(), x.end());
-    std::vector<double> z(n);
+    z.resize(n);
     for (std::size_t i = 0; i < n; ++i) z[i] = normcdf(x[i], mu, sigma);
     // A2 = -n - 1/n * sum_{i=1}^n (2i-1) * (log(z_i) + log(1 - z_{n+1-i}))
     double s = 0.0;

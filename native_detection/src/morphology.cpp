@@ -5,7 +5,7 @@
 
 namespace cme {
 
-ImageD locmax2d(const ImageD& img, int maskSize) {
+ImageD locmax2d(const ImageD& img, int maskSize, int threads) {
     if (maskSize % 2 == 0) maskSize += 1;
     const int b = (maskSize - 1) / 2;
     const std::size_t ny = img.ny(), nx = img.nx();
@@ -15,7 +15,10 @@ ImageD locmax2d(const ImageD& img, int maskSize) {
     // Only pixels outside the border strip can be non-zero; for those the
     // window lies fully inside the image, so ordfilt2's zero padding never
     // enters the computation.
-    for (std::size_t x = static_cast<std::size_t>(b); x + static_cast<std::size_t>(b) < nx; ++x) {
+    const long xEnd = static_cast<long>(nx) - b;
+    #pragma omp parallel for schedule(static) num_threads(threads > 1 ? threads : 1) if(threads > 1)
+    for (long xx = b; xx < xEnd; ++xx) {
+        const std::size_t x = static_cast<std::size_t>(xx);
         for (std::size_t y = static_cast<std::size_t>(b); y + static_cast<std::size_t>(b) < ny; ++y) {
             const double v = img(y, x);
             // max and second max over the window

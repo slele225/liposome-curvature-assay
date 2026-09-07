@@ -23,6 +23,7 @@
 
 #include "g116_lm.h"
 #include "g116_linalg.h"
+#include "g116_blas.h"   /* inline level-1 BLAS (bit-identical to gslcblas, no DLL calls) */
 
 /* --- 1.16 declarations ---------------------------------------------------- */
 #define gsl_multifit_function_fdf g116_function_fdf
@@ -48,9 +49,37 @@ static int g116_dif_fdf_stub(const gsl_vector * x, gsl_multifit_function_fdf * f
 #define gsl_multifit_fdfsolver_dif_df g116_dif_df_stub
 #define gsl_multifit_fdfsolver_dif_fdf g116_dif_fdf_stub
 
+/* optional phase timing (cme_detect --profile); the wrappers only add a
+ * branch per call when profiling is off */
+int cme_prof_enabled_c(void);
+double cme_prof_now_c(void);
+void cme_prof_add_c(int phase, double t0);
+#define CME_PROF_LM_QRPT 19    /* cme::prof::LM_qrpt  (checked by static_assert in profile.cpp) */
+#define CME_PROF_LM_QTVEC 20   /* cme::prof::LM_qtvec */
+static int g116_QRPT_decomp_timed(gsl_matrix * A, gsl_vector * tau, gsl_permutation * p, int *signum, gsl_vector * norm)
+{
+    if (cme_prof_enabled_c()) {
+        double t0 = cme_prof_now_c();
+        int st = g116_QRPT_decomp(A, tau, p, signum, norm);
+        cme_prof_add_c(CME_PROF_LM_QRPT, t0);
+        return st;
+    }
+    return g116_QRPT_decomp(A, tau, p, signum, norm);
+}
+static int g116_QR_QTvec_timed(const gsl_matrix * QR, const gsl_vector * tau, gsl_vector * v)
+{
+    if (cme_prof_enabled_c()) {
+        double t0 = cme_prof_now_c();
+        int st = g116_QR_QTvec(QR, tau, v);
+        cme_prof_add_c(CME_PROF_LM_QTVEC, t0);
+        return st;
+    }
+    return g116_QR_QTvec(QR, tau, v);
+}
+
 /* renames */
-#define gsl_linalg_QRPT_decomp g116_QRPT_decomp
-#define gsl_linalg_QR_QTvec g116_QR_QTvec
+#define gsl_linalg_QRPT_decomp g116_QRPT_decomp_timed
+#define gsl_linalg_QR_QTvec g116_QR_QTvec_timed
 #define gsl_multifit_covar g116_covar
 #define gsl_multifit_test_delta g116_test_delta
 #define gsl_multifit_test_gradient g116_test_gradient

@@ -38,7 +38,11 @@ licence text is kept verbatim at the path given.
   Gerard Jungman, Brian Gough), compiled against GSL 2.8 through the small
   wrappers `g116_lm.c` / `g116_linalg.c`. The 1.16 solver is used because
   it is the one the original cmeAnalysis `fitGaussian2D` MEX was built
-  with (see `PORTING_NOTES.md` §2.4).
+  with (see `PORTING_NOTES.md` §2.4). `g116_blas.h` re-implements the few
+  level-1 BLAS routines the solver calls (`ddot`, `daxpy`, `dscal`, `dnrm2`,
+  `idamax`) and some vector copy/permute helpers, following the reference
+  gslcblas / GSL vector sources operation for operation (GPL-3.0), so that the
+  solver does not cross the DLL boundary in its inner loops.
 * **Licence:** GNU GPL v3 — `third_party/gsl116/COPYING`.
 
 ## libtiff 4.7.0 — pre-built
